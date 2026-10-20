@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    /* Bun ejecuta el TypeScript directamente: tsc sólo se usa para chequear tipos. */
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "moduleDetection": "force",
+    "types": ["bun-types"],
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+
+    /* Chequeo de tipos */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "tests", "drizzle.config.ts"]
+}

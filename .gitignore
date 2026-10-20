@@ -1,0 +1,25 @@
+# dependencias
+/node_modules
+
+# build / cobertura
+/build
+/dist
+/coverage
+
+# datos generados en runtime
+/data
+/uploads
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# variables de entorno (.env.example sí se versiona)
+.env
+.env.local
+.env.*.local
+
+# misc
+.DS_Store
+*.log
+*.pem
+package-lock.json

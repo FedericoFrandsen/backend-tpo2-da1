@@ -1,0 +1,26 @@
+{
+  "name": "backend-tpo-da1",
+  "version": "1.0.50",
+  "private": true,
+  "type": "module",
+  "module": "src/index.ts",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed": "bun run src/db/seed.ts",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "drizzle-orm": "^1.0.0-rc.4",
+    "elysia": "latest"
+  },
+  "devDependencies": {
+    "bun-types": "latest",
+    "drizzle-kit": "^1.0.0-rc.4",
+    "typescript": "^7.0.2"
+  }
+}

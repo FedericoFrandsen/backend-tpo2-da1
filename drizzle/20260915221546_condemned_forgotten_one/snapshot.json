@@ -1,0 +1,1508 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "8bc69e0b-5c3e-463b-b649-692e2c98b2a1",
+  "prevIds": [
+    "8aaa1623-8479-4fd3-a3be-934f33d18aeb"
+  ],
+  "ddl": [
+    {
+      "name": "favorites",
+      "entityType": "tables"
+    },
+    {
+      "name": "offers",
+      "entityType": "tables"
+    },
+    {
+      "name": "operations",
+      "entityType": "tables"
+    },
+    {
+      "name": "otp_codes",
+      "entityType": "tables"
+    },
+    {
+      "name": "publication_images",
+      "entityType": "tables"
+    },
+    {
+      "name": "publications",
+      "entityType": "tables"
+    },
+    {
+      "name": "questions",
+      "entityType": "tables"
+    },
+    {
+      "name": "reviews",
+      "entityType": "tables"
+    },
+    {
+      "name": "saved_searches",
+      "entityType": "tables"
+    },
+    {
+      "name": "sessions",
+      "entityType": "tables"
+    },
+    {
+      "name": "users",
+      "entityType": "tables"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "favorites"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "favorites"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "saved_price_cents",
+      "entityType": "columns",
+      "table": "favorites"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "has_update",
+      "entityType": "columns",
+      "table": "favorites"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "favorites"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "buyer_id",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "amount_cents",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "message",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "counter_amount_cents",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "offer_id",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "buyer_id",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "seller_id",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "amount_cents",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "completed_at",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "email",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "purpose",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "code_hash",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "attempts",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "consumed_at",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "publication_images"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "publication_images"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "url",
+      "entityType": "columns",
+      "table": "publication_images"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "position",
+      "entityType": "columns",
+      "table": "publication_images"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "seller_id",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "title",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "description",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "category",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "price_cents",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "item_condition",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "zone",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "address",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "real",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "latitude",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "real",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "longitude",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "published_at",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "asker_id",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "text",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "answer",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "answered_at",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "operation_id",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reviewer_id",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reviewed_user_id",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "rating",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "comment",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "query_text",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "category",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "min_price_cents",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "max_price_cents",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "item_condition",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "zone",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'recent'",
+      "generated": null,
+      "name": "sort",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "unread_count",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_checked_at",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "token_hash",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "email",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "username",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "password_hash",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "phone",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "zone",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "avatar_url",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "email_verified_at",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_favorites_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "favorites"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_favorites_publication_id_publications_id_fk",
+      "entityType": "fks",
+      "table": "favorites"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_offers_publication_id_publications_id_fk",
+      "entityType": "fks",
+      "table": "offers"
+    },
+    {
+      "columns": [
+        "buyer_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_offers_buyer_id_users_id_fk",
+      "entityType": "fks",
+      "table": "offers"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_operations_publication_id_publications_id_fk",
+      "entityType": "fks",
+      "table": "operations"
+    },
+    {
+      "columns": [
+        "offer_id"
+      ],
+      "tableTo": "offers",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_operations_offer_id_offers_id_fk",
+      "entityType": "fks",
+      "table": "operations"
+    },
+    {
+      "columns": [
+        "buyer_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_operations_buyer_id_users_id_fk",
+      "entityType": "fks",
+      "table": "operations"
+    },
+    {
+      "columns": [
+        "seller_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_operations_seller_id_users_id_fk",
+      "entityType": "fks",
+      "table": "operations"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_publication_images_publication_id_publications_id_fk",
+      "entityType": "fks",
+      "table": "publication_images"
+    },
+    {
+      "columns": [
+        "seller_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_publications_seller_id_users_id_fk",
+      "entityType": "fks",
+      "table": "publications"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_questions_publication_id_publications_id_fk",
+      "entityType": "fks",
+      "table": "questions"
+    },
+    {
+      "columns": [
+        "asker_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_questions_asker_id_users_id_fk",
+      "entityType": "fks",
+      "table": "questions"
+    },
+    {
+      "columns": [
+        "operation_id"
+      ],
+      "tableTo": "operations",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_reviews_operation_id_operations_id_fk",
+      "entityType": "fks",
+      "table": "reviews"
+    },
+    {
+      "columns": [
+        "reviewer_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_reviews_reviewer_id_users_id_fk",
+      "entityType": "fks",
+      "table": "reviews"
+    },
+    {
+      "columns": [
+        "reviewed_user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_reviews_reviewed_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "reviews"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_saved_searches_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "saved_searches"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_sessions_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "sessions"
+    },
+    {
+      "columns": [
+        "user_id",
+        "publication_id"
+      ],
+      "nameExplicit": false,
+      "name": "favorites_pk",
+      "entityType": "pks",
+      "table": "favorites"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "offers_pk",
+      "table": "offers",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "operations_pk",
+      "table": "operations",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "otp_codes_pk",
+      "table": "otp_codes",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "publication_images_pk",
+      "table": "publication_images",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "publications_pk",
+      "table": "publications",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "questions_pk",
+      "table": "questions",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "reviews_pk",
+      "table": "reviews",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "saved_searches_pk",
+      "table": "saved_searches",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "sessions_pk",
+      "table": "sessions",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "users_pk",
+      "table": "users",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "email",
+          "isExpression": false
+        },
+        {
+          "value": "purpose",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "idx_otp_email_purpose",
+      "entityType": "indexes",
+      "table": "otp_codes"
+    },
+    {
+      "columns": [
+        {
+          "value": "publication_id",
+          "isExpression": false
+        },
+        {
+          "value": "position",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "publication_image_position_unique",
+      "entityType": "indexes",
+      "table": "publication_images"
+    },
+    {
+      "columns": [
+        {
+          "value": "status",
+          "isExpression": false
+        },
+        {
+          "value": "published_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "idx_publications_feed",
+      "entityType": "indexes",
+      "table": "publications"
+    },
+    {
+      "columns": [
+        {
+          "value": "seller_id",
+          "isExpression": false
+        },
+        {
+          "value": "status",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "idx_publications_seller",
+      "entityType": "indexes",
+      "table": "publications"
+    },
+    {
+      "columns": [
+        {
+          "value": "operation_id",
+          "isExpression": false
+        },
+        {
+          "value": "reviewer_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "review_operation_reviewer_unique",
+      "entityType": "indexes",
+      "table": "reviews"
+    },
+    {
+      "columns": [
+        {
+          "value": "reviewed_user_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "idx_reviews_reviewed_user",
+      "entityType": "indexes",
+      "table": "reviews"
+    },
+    {
+      "columns": [
+        {
+          "value": "token_hash",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "idx_sessions_token",
+      "entityType": "indexes",
+      "table": "sessions"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "nameExplicit": false,
+      "name": "operations_publication_id_unique",
+      "entityType": "uniques",
+      "table": "operations"
+    },
+    {
+      "columns": [
+        "offer_id"
+      ],
+      "nameExplicit": false,
+      "name": "operations_offer_id_unique",
+      "entityType": "uniques",
+      "table": "operations"
+    },
+    {
+      "columns": [
+        "email"
+      ],
+      "nameExplicit": false,
+      "name": "users_email_unique",
+      "entityType": "uniques",
+      "table": "users"
+    },
+    {
+      "columns": [
+        "username"
+      ],
+      "nameExplicit": false,
+      "name": "users_username_unique",
+      "entityType": "uniques",
+      "table": "users"
+    },
+    {
+      "value": "\"status\" IN ('pending', 'countered', 'accepted', 'rejected', 'expired', 'cancelled')",
+      "name": "offer_status_check",
+      "entityType": "checks",
+      "table": "offers"
+    },
+    {
+      "value": "\"purpose\" IN ('registration', 'login')",
+      "name": "otp_purpose_check",
+      "entityType": "checks",
+      "table": "otp_codes"
+    },
+    {
+      "value": "\"item_condition\" IN ('new', 'like_new', 'used')",
+      "name": "publication_condition_check",
+      "entityType": "checks",
+      "table": "publications"
+    },
+    {
+      "value": "\"status\" IN ('active', 'paused', 'sold')",
+      "name": "publication_status_check",
+      "entityType": "checks",
+      "table": "publications"
+    },
+    {
+      "value": "\"rating\" BETWEEN 1 AND 5",
+      "name": "review_rating_check",
+      "entityType": "checks",
+      "table": "reviews"
+    }
+  ],
+  "renames": []
+}
