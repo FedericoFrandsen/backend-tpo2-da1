@@ -13,6 +13,7 @@ const authUserColumns = {
   username: users.username,
   name: users.name,
   phone: users.phone,
+  sharePhone: users.sharePhone,
   zone: users.zone,
   avatarUrl: users.avatarUrl,
   createdAt: users.createdAt,
@@ -24,6 +25,7 @@ export type AuthUser = {
   username: string | null;
   name: string;
   phone: string | null;
+  sharePhone: boolean;
   zone: string | null;
   avatarUrl: string | null;
   createdAt: string;

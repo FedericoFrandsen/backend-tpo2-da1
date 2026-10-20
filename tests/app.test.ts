@@ -1,704 +1,386 @@
-import { afterAll, describe, expect, test } from "bun:test";
-import { sql } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { eq } from "drizzle-orm";
+import { cpSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { createApp } from "../src/app";
 import { createDatabase } from "../src/database";
+import { createSession } from "../src/auth";
+import { claims, halladoPublications as posts, loginAttempts, otpCodes, sessions, users } from "../src/db/schema";
+import { localDate, nowIso } from "../src/utils";
+import { config } from "../src/config";
+import { sendOtp } from "../src/mailer";
 
-const db = createDatabase(":memory:");
-const app = createApp(db);
+let db: ReturnType<typeof createDatabase>;
+let app: ReturnType<typeof createApp>;
+let temp: string;
+let codes: Map<string, string>;
+let accounts: { id: string; email: string; token: string }[];
+const password = "Hallado123";
+const passwordHash = await Bun.password.hash(password);
 
-async function api(path: string, options: { method?: string; token?: string; body?: unknown } = {}) {
-  const response = await app.handle(
-    new Request(`http://localhost${path}`, {
-      method: options.method ?? "GET",
-      headers: {
-        ...(options.body ? { "content-type": "application/json" } : {}),
-        ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
-      },
-      body: options.body ? JSON.stringify(options.body) : undefined,
-    }),
-  );
-  const data = await response.json();
+async function api(path: string, method = "GET", body?: unknown, token?: string) {
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (body !== undefined && !(body instanceof FormData)) headers.set("Content-Type", "application/json");
+  const request = new Request(`http://localhost${path}`, { method, headers,
+    body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body) });
+  const response = await app.handle(request);
+  const data: any = response.headers.get("content-type")?.includes("json") ? await response.json() : await response.text();
   return { response, data };
 }
+function postBody(extra: Record<string, unknown> = {}) {
+  return { tipo: "encontre", titulo: "Llaves con llavero azul", descripcion: "Juego de tres llaves con un llavero de color azul.",
+    categoria: "Llaves", barrio: "Palermo", fecha: localDate(), franja: "tarde", direccionExacta: "Calle privada 123", fotos: [], ...extra };
+}
+const filters = { situacion: "perdi", categoria: "Llaves", zona: "Palermo", periodo: "semana" };
+const query = (extra: Record<string, string> = {}) => `/publicaciones?${new URLSearchParams({ ...filters, ...extra })}`;
+async function publish(extra: Record<string, unknown> = {}, owner = 0) {
+  const result = await api("/publicaciones", "POST", postBody(extra), accounts[owner]!.token);
+  expect(result.response.status).toBe(201);
+  return result.data;
+}
+async function claim(postId: string, claimant = 1) {
+  const result = await api(`/publicaciones/${postId}/reclamos`, "POST", { mensaje: "Son mis llaves, tienen una marca especial." }, accounts[claimant]!.token);
+  expect(result.response.status).toBe(201);
+  return result.data;
+}
+async function accept(postId: string, claimant = 1) {
+  const c = await claim(postId, claimant);
+  expect((await api(`/reclamos/${c.id}/aceptar`, "POST", undefined, accounts[0]!.token)).response.status).toBe(200);
+  return c;
+}
 
-/** El código ya no viaja en la respuesta HTTP: se loguea por consola (dev), así que lo interceptamos. */
-async function requestOtp(email: string, purpose: "registration" | "login" | "set_password") {
-  const logs: string[] = [];
-  const originalLog = console.log;
-  console.log = (...args: unknown[]) => logs.push(args.join(" "));
-  let requested: Awaited<ReturnType<typeof api>>;
-  try {
-    requested = await api("/auth/otp/request", { method: "POST", body: { email, purpose } });
-  } finally {
-    console.log = originalLog;
+beforeEach(async () => {
+  temp = mkdtempSync(join(tmpdir(), "hallado-test-"));
+  db = createDatabase(":memory:");
+  codes = new Map();
+  app = createApp(db, { uploadsPath: join(temp, "uploads"), sendOtp: async ({ email, code, purpose }) => { codes.set(`${email}:${purpose}`, code); } });
+  accounts = [];
+  for (let i = 0; i < 3; i++) {
+    const id = `user-${i}`;
+    const email = `test${i}@example.com`;
+    db.insert(users).values({ id, email, passwordHash, name: `Persona ${i}`, phone: `115555000${i}`, sharePhone: true, zone: "Palermo", createdAt: nowIso(), emailVerifiedAt: nowIso() }).run();
+    accounts.push({ id, email, token: (await createSession(db, id, 1)).token });
   }
-  expect(requested.response.status).toBe(200);
-  const code = logs.join("\n").match(/\b(\d{6})\b/)?.[1];
-  if (!code) throw new Error(`No se logueó el código OTP para ${email}`);
-  return code;
-}
-
-async function register(email: string, name: string, password = "password123") {
-  const code = await requestOtp(email, "registration");
-  const verified = await api("/auth/otp/verify", {
-    method: "POST",
-    body: { email, purpose: "registration", code, name, password, zone: "Palermo" },
-  });
-  expect(verified.response.status).toBe(200);
-  return { id: verified.data.userId as string, token: verified.data.session.token as string };
-}
-
-/** Crea una publicación completa (el alta guiada vive en el cliente, acá siempre se manda entera). Devuelve el id, ya activa. */
-async function publish(token: string, overrides: Record<string, unknown> = {}) {
-  const created = await api("/publications", {
-    method: "POST",
-    token,
-    body: {
-      title: "Bicicleta urbana",
-      description: "Bicicleta en excelente estado y poco uso",
-      category: "sports",
-      price: 450,
-      condition: "like_new",
-      address: "Av. Santa Fe 3253, Palermo, CABA",
-      imageUrls: ["https://images.example.com/bike.jpg"],
-      ...overrides,
-    },
-  });
-  expect(created.response.status).toBe(200);
-  expect(created.data.status).toBe("active");
-  return created.data.id as string;
-}
-
-afterAll(() => db.$client.close());
-
-describe("Marketplace API", () => {
-  test("flujo completo: registro, publicación, favorito, venta y reputación", async () => {
-    const seller = await register("seller@example.com", "Seller");
-    const buyer = await register("buyer@example.com", "Buyer");
-
-    const savedSearch = await api("/saved-searches", {
-      method: "POST",
-      token: buyer.token,
-      body: { name: "Bicis cerca", query: "bicicleta", category: "sports", zone: "Palermo" },
-    });
-    expect(savedSearch.response.status).toBe(200);
-    expect(savedSearch.data.query).toBe("bicicleta");
-    expect(savedSearch.data.unreadCount).toBe(0);
-
-    const publicationId = await publish(seller.token);
-
-    const feed = await api("/publications?q=bicicleta&category=sports&sort=price_asc");
-    expect(feed.data.pagination.total).toBe(1);
-    expect(feed.data.items[0].price).toBe(450);
-    expect(feed.data.items[0].zone).toBe("Palermo");
-    expect(feed.data.items[0].coverImage).toBe("https://images.example.com/bike.jpg");
-    expect(feed.data.items[0]).toMatchObject({
-      isFavorite: false,
-      actions: { canAsk: false, canOffer: false, canFavorite: false, canManage: false },
-    });
-
-    const feedAsBuyer = await api("/publications?q=bicicleta", { token: buyer.token });
-    expect(feedAsBuyer.data.items[0]).toMatchObject({
-      isFavorite: false,
-      actions: { canAsk: true, canOffer: true, canFavorite: true, canManage: false },
-    });
-    const feedAsSeller = await api("/publications?q=bicicleta", { token: seller.token });
-    expect(feedAsSeller.data.items[0]).toMatchObject({
-      isFavorite: false,
-      actions: { canAsk: false, canOffer: false, canFavorite: false, canManage: true },
-    });
-
-    const searches = await api("/saved-searches", { token: buyer.token });
-    expect(searches.data.items[0].unreadCount).toBe(1);
-
-    const favorite = await api(`/publications/${publicationId}/favorite`, { method: "POST", token: buyer.token });
-    expect(favorite.data.isFavorite).toBe(true);
-    const feedAfterFavorite = await api("/publications?q=bicicleta", { token: buyer.token });
-    expect(feedAfterFavorite.data.items[0]).toMatchObject({
-      isFavorite: true,
-      actions: { canAsk: true, canOffer: true, canFavorite: true, canManage: false },
-    });
-
-    await api(`/publications/${publicationId}`, { method: "PATCH", token: seller.token, body: { price: 440 } });
-    const favorites = await api("/me/favorites", { token: buyer.token });
-    expect(favorites.data.unreadCount).toBe(1);
-    expect(favorites.data.items[0].priceChanged).toBe(1);
-    expect(favorites.data.items[0].coverImage).toBe("https://images.example.com/bike.jpg");
-
-    const offer = await api(`/publications/${publicationId}/offers`, {
-      method: "POST",
-      token: buyer.token,
-      body: { amount: 425 },
-    });
-    const accepted = await api(`/offers/${offer.data.id}/respond`, {
-      method: "POST",
-      token: seller.token,
-      body: { action: "accept" },
-    });
-    expect(accepted.data.status).toBe("accepted");
-
-    const review = await api(`/operations/${accepted.data.operationId}/reviews`, {
-      method: "POST",
-      token: buyer.token,
-      body: { rating: 5, comment: "Excelente vendedor" },
-    });
-    expect(review.data.rating).toBe(5);
-
-    const profile = await api(`/users/${seller.id}`);
-    expect(profile.data.ratingAverage).toBe(5);
-    expect(profile.data.salesCompleted).toBe(1);
-
-    const operations = await api("/me/operations", { token: buyer.token });
-    expect(operations.data.items).toHaveLength(1);
-    expect(operations.data.items[0]).toMatchObject({
-      amount: 425,
-      title: "Bicicleta urbana",
-      buyerName: "Buyer",
-      sellerName: "Seller",
-      myRating: 5,
-    });
-
-    // El vendedor participa de la misma operación pero todavía no calificó.
-    const sellerOperations = await api("/me/operations", { token: seller.token });
-    expect(sellerOperations.data.items[0].myRating).toBeNull();
-  });
-
-  test("ofertas: ambas partes las ven, el comprador puede cancelar y el vendedor rechazar", async () => {
-    const seller = await register("offers-seller@example.com", "Offers Seller");
-    const buyer = await register("offers-buyer@example.com", "Offers Buyer");
-    const publicationId = await publish(seller.token, { title: "Guitarra criolla", category: "other", price: 300 });
-
-    const offer = await api(`/publications/${publicationId}/offers`, {
-      method: "POST",
-      token: buyer.token,
-      body: { amount: 250 },
-    });
-    expect(offer.data.status).toBe("pending");
-
-    const asBuyer = await api("/me/offers", { token: buyer.token });
-    expect(asBuyer.data.items).toHaveLength(1);
-    expect(asBuyer.data.items[0]).toMatchObject({ amount: 250, role: "buyer", title: "Guitarra criolla" });
-
-    const asSeller = await api("/me/offers", { token: seller.token });
-    expect(asSeller.data.items).toHaveLength(1);
-    expect(asSeller.data.items[0].role).toBe("seller");
-
-    // Un tercero no ve ofertas ajenas.
-    const stranger = await register("offers-stranger@example.com", "Stranger");
-    expect((await api("/me/offers", { token: stranger.token })).data.items).toHaveLength(0);
-
-    const cancelled = await api(`/offers/${offer.data.id}/cancel`, { method: "POST", token: buyer.token });
-    expect(cancelled.data.status).toBe("cancelled");
-
-    const rejected = await api(`/offers/${offer.data.id}/respond`, {
-      method: "POST",
-      token: seller.token,
-      body: { action: "accept" },
-    });
-    expect(rejected.response.status).toBe(409);
-    expect(rejected.data.error.code).toBe("OFFER_ALREADY_RESOLVED");
-  });
-
-  test("preguntas: sólo el vendedor responde", async () => {
-    const seller = await register("questions-seller@example.com", "Q Seller");
-    const buyer = await register("questions-buyer@example.com", "Q Buyer");
-    const publicationId = await publish(seller.token, { title: "Notebook usada", category: "electronics" });
-
-    const question = await api(`/publications/${publicationId}/questions`, {
-      method: "POST",
-      token: buyer.token,
-      body: { text: "¿Aceptás envío?" },
-    });
-    expect(question.response.status).toBe(200);
-
-    const byBuyer = await api(`/questions/${question.data.id}/answer`, {
-      method: "POST",
-      token: buyer.token,
-      body: { answer: "Me respondo solo" },
-    });
-    expect(byBuyer.response.status).toBe(403);
-
-    const answered = await api(`/questions/${question.data.id}/answer`, {
-      method: "POST",
-      token: seller.token,
-      body: { answer: "Sí, hago envíos a todo el país" },
-    });
-    expect(answered.response.status).toBe(200);
-
-    const detail = await api(`/publications/${publicationId}`);
-    expect(detail.data.questions[0].answer).toBe("Sí, hago envíos a todo el país");
-    expect(detail.data.questions[0].askerName).toBe("Q Buyer");
-  });
-
-  test("pausar oculta la publicación del feed, pero mantiene el detalle sin acciones", async () => {
-    const seller = await register("paused-seller@example.com", "Paused Seller");
-    const buyer = await register("paused-buyer@example.com", "Paused Buyer");
-    const publicationId = await publish(seller.token, { title: "Mesa ratona", category: "home", price: 120 });
-
-    const paused = await api(`/publications/${publicationId}/status`, {
-      method: "PATCH",
-      token: seller.token,
-      body: { status: "paused" },
-    });
-    expect(paused.data.status).toBe("paused");
-
-    const feed = await api("/publications?q=ratona");
-    expect(feed.data.pagination.total).toBe(0);
-    const detail = await api(`/publications/${publicationId}`, { token: buyer.token });
-    expect(detail.response.status).toBe(200);
-    expect(detail.data.status).toBe("paused");
-    expect(detail.data.actions).toEqual({
-      canAsk: false,
-      canOffer: false,
-      canFavorite: false,
-      canManage: false,
-    });
-
-    const ownerDetail = await api(`/publications/${publicationId}`, { token: seller.token });
-    expect(ownerDetail.response.status).toBe(200);
-    expect(ownerDetail.data.actions.canManage).toBe(true);
-
-    const reactivated = await api(`/publications/${publicationId}/status`, {
-      method: "PATCH",
-      token: seller.token,
-      body: { status: "active" },
-    });
-    expect(reactivated.data.status).toBe("active");
-    expect((await api("/publications?q=ratona")).data.pagination.total).toBe(1);
-  });
-
-  test("la zona de una publicación se deriva siempre del perfil del vendedor", async () => {
-    const seller = await register("zone-seller@example.com", "Zone Seller");
-    const publicationId = await publish(seller.token, {
-      title: "Artículo con zona heredada",
-      zone: "Zona enviada que debe ignorarse",
-    });
-
-    const initialDetail = await api(`/publications/${publicationId}`);
-    expect(initialDetail.data.zone).toBe("Palermo");
-
-    await api("/me", { method: "PATCH", token: seller.token, body: { zone: "Caballito" } });
-
-    const updatedDetail = await api(`/publications/${publicationId}`);
-    expect(updatedDetail.data.zone).toBe("Caballito");
-    expect((await api("/publications?q=zona%20heredada&zone=Palermo")).data.pagination.total).toBe(0);
-    expect((await api("/publications?q=zona%20heredada&zone=Caballito")).data.pagination.total).toBe(1);
-
-    const zones = await api("/zones");
-    expect(zones.response.status).toBe(200);
-    expect(zones.data.items).toContain("Caballito");
-    expect(zones.data.items).not.toContain("Zona enviada que debe ignorarse");
-    expect(new Set(zones.data.items).size).toBe(zones.data.items.length);
-  });
-
-  test("las rutas privadas rechazan requests sin sesión", async () => {
-    const result = await api("/me");
-    expect(result.response.status).toBe(401);
-    expect(result.data.error.code).toBe("UNAUTHORIZED");
-
-    const withBadToken = await api("/me", { token: "no-existe" });
-    expect(withBadToken.response.status).toBe(401);
-    expect(withBadToken.data.error.code).toBe("INVALID_SESSION");
-  });
-
-  test("consigna 4/8: la dirección exacta se oculta hasta que se acepta la oferta", async () => {
-    const seller = await register("address-seller@example.com", "Address Seller");
-    const buyer = await register("address-buyer@example.com", "Address Buyer");
-    const stranger = await register("address-stranger@example.com", "Address Stranger");
-    const publicationId = await publish(seller.token, { title: "Sommier dos plazas", category: "home" });
-
-    const asStranger = await api(`/publications/${publicationId}`, { token: stranger.token });
-    expect(asStranger.data.addressLocked).toBe(true);
-    expect(asStranger.data.address).toBeNull();
-
-    const asSeller = await api(`/publications/${publicationId}`, { token: seller.token });
-    expect(asSeller.data.addressLocked).toBe(false);
-    expect(asSeller.data.address).toBe("Av. Santa Fe 3253, Palermo, CABA");
-
-    const offer = await api(`/publications/${publicationId}/offers`, {
-      method: "POST",
-      token: buyer.token,
-      body: { amount: 100, message: "¿Cerramos en 100?" },
-    });
-    expect(offer.data.message).toBe("¿Cerramos en 100?");
-
-    const beforeAccept = await api(`/publications/${publicationId}`, { token: buyer.token });
-    expect(beforeAccept.data.addressLocked).toBe(true);
-
-    await api(`/offers/${offer.data.id}/respond`, { method: "POST", token: seller.token, body: { action: "accept" } });
-
-    const afterAccept = await api(`/publications/${publicationId}`, { token: buyer.token });
-    expect(afterAccept.data.addressLocked).toBe(false);
-    expect(afterAccept.data.address).toBe("Av. Santa Fe 3253, Palermo, CABA");
-  });
-
-  test("consigna 7: el vendedor contraoferta y el comprador la acepta, cerrando la venta al nuevo precio", async () => {
-    const seller = await register("counter-seller@example.com", "Counter Seller");
-    const buyer = await register("counter-buyer@example.com", "Counter Buyer");
-    const publicationId = await publish(seller.token, { title: "Heladera usada", category: "home", price: 500 });
-
-    const offer = await api(`/publications/${publicationId}/offers`, {
-      method: "POST",
-      token: buyer.token,
-      body: { amount: 400 },
-    });
-
-    const countered = await api(`/offers/${offer.data.id}/respond`, {
-      method: "POST",
-      token: seller.token,
-      body: { action: "counter", counterAmount: 450 },
-    });
-    expect(countered.data.status).toBe("countered");
-
-    // El vendedor ya no puede volver a responder la oferta original: espera al comprador.
-    const secondAttempt = await api(`/offers/${offer.data.id}/respond`, {
-      method: "POST",
-      token: seller.token,
-      body: { action: "accept" },
-    });
-    expect(secondAttempt.response.status).toBe(409);
-
-    const accepted = await api(`/offers/${offer.data.id}/respond-to-counter`, {
-      method: "POST",
-      token: buyer.token,
-      body: { action: "accept" },
-    });
-    expect(accepted.data.status).toBe("accepted");
-
-    const operations = await api("/me/operations", { token: buyer.token });
-    expect(operations.data.items[0].amount).toBe(450);
-    expect(operations.data.items[0].type).toBe("buy");
-  });
-
-  test("consigna 9: no se puede calificar pasados los 7 días de la entrega", async () => {
-    const seller = await register("late-review-seller@example.com", "Late Seller");
-    const buyer = await register("late-review-buyer@example.com", "Late Buyer");
-    const publicationId = await publish(seller.token, { title: "Ventilador de pie", category: "home", price: 80 });
-
-    const offer = await api(`/publications/${publicationId}/offers`, {
-      method: "POST",
-      token: buyer.token,
-      body: { amount: 80 },
-    });
-    const accepted = await api(`/offers/${offer.data.id}/respond`, {
-      method: "POST",
-      token: seller.token,
-      body: { action: "accept" },
-    });
-
-    const eightDaysAgo = new Date(Date.now() - 8 * 86_400_000).toISOString();
-    db.run(sql`UPDATE operations SET completed_at = ${eightDaysAgo} WHERE id = ${accepted.data.operationId}`);
-
-    const review = await api(`/operations/${accepted.data.operationId}/reviews`, {
-      method: "POST",
-      token: buyer.token,
-      body: { rating: 5 },
-    });
-    expect(review.response.status).toBe(409);
-    expect(review.data.error.code).toBe("REVIEW_WINDOW_EXPIRED");
-  });
-
-  test("consigna 2: el perfil se puede editar con foto de perfil", async () => {
-    const user = await register("avatar-user@example.com", "Avatar User");
-    const updated = await api("/me", {
-      method: "PATCH",
-      token: user.token,
-      body: { avatarUrl: "https://example.com/avatar.jpg" },
-    });
-    expect(updated.data.avatarUrl).toBe("https://example.com/avatar.jpg");
-
-    const me = await api("/me", { token: user.token });
-    expect(me.data.avatarUrl).toBe("https://example.com/avatar.jpg");
-    expect(me.data.hasPassword).toBe(true);
-  });
-
-  test("registro sin contraseña: se puede agregar después vía OTP y luego loguearse con ella", async () => {
-    const email = "no-password-user@example.com";
-    const registerCode = await requestOtp(email, "registration");
-    const registered = await api("/auth/otp/verify", {
-      method: "POST",
-      body: { email, purpose: "registration", code: registerCode, name: "No Password" },
-    });
-    expect(registered.response.status).toBe(200);
-
-    const profileWithoutPassword = await api("/me", { token: registered.data.session.token });
-    expect(profileWithoutPassword.data.hasPassword).toBe(false);
-
-    // Sin contraseña todavía no puede loguearse por password.
-    const failedLogin = await api("/auth/login/password", {
-      method: "POST",
-      body: { email, password: "newpassword123" },
-    });
-    expect(failedLogin.response.status).toBe(401);
-
-    // El código no se consume si falla por falta de password, así que se puede reintentar con el mismo.
-    const setPasswordCode = await requestOtp(email, "set_password");
-    const withoutPassword = await api("/auth/otp/verify", {
-      method: "POST",
-      body: { email, purpose: "set_password", code: setPasswordCode },
-    });
-    expect(withoutPassword.response.status).toBe(422);
-    expect(withoutPassword.data.error.code).toBe("PASSWORD_REQUIRED");
-
-    const setPassword = await api("/auth/otp/verify", {
-      method: "POST",
-      body: { email, purpose: "set_password", code: setPasswordCode, password: "newpassword123" },
-    });
-    expect(setPassword.response.status).toBe(200);
-    expect(setPassword.data.userId).toBe(registered.data.userId);
-
-    const profileWithPassword = await api("/me", { token: setPassword.data.session.token });
-    expect(profileWithPassword.data.hasPassword).toBe(true);
-
-    const login = await api("/auth/login/password", {
-      method: "POST",
-      body: { email, password: "newpassword123" },
-    });
-    expect(login.response.status).toBe(200);
-    expect(login.data.userId).toBe(registered.data.userId);
-  });
-
-  test("consigna 9: operaciones con contraparte normalizada, permiso y plazo de calificación", async () => {
-    const seller = await register("op-seller@example.com", "Op Seller");
-    const buyer = await register("op-buyer@example.com", "Op Buyer");
-    const stranger = await register("op-stranger@example.com", "Op Stranger");
-    await api("/me", { method: "PATCH", token: seller.token, body: { avatarUrl: "https://example.com/seller.jpg" } });
-    const publicationId = await publish(seller.token, { title: "Escritorio", category: "home", price: 200 });
-    const offer = await api(`/publications/${publicationId}/offers`, { method: "POST", token: buyer.token, body: { amount: 200 } });
-    const accepted = await api(`/offers/${offer.data.id}/respond`, { method: "POST", token: seller.token, body: { action: "accept" } });
-    const operationId = accepted.data.operationId as string;
-
-    const asBuyer = (await api("/me/operations", { token: buyer.token })).data.items[0];
-    expect(asBuyer).toMatchObject({
-      type: "buy",
-      counterpartyId: seller.id,
-      counterpartyName: "Op Seller",
-      counterpartyAvatarUrl: "https://example.com/seller.jpg",
-      canReview: true,
-    });
-    const asSeller = (await api("/me/operations", { token: seller.token })).data.items[0];
-    expect(asSeller).toMatchObject({
-      type: "sell",
-      counterpartyId: buyer.id,
-      counterpartyName: "Op Buyer",
-      counterpartyAvatarUrl: null,
-      canReview: true,
-    });
-    const deadline = new Date(asBuyer.reviewDeadline).getTime();
-    expect(Math.abs(deadline - (Date.now() + 7 * 86_400_000))).toBeLessThan(10_000);
-
-    // Detalle individual: mismos datos, y sólo para las partes.
-    const detail = await api(`/operations/${operationId}`, { token: buyer.token });
-    expect(detail.data).toEqual(asBuyer);
-    const foreign = await api(`/operations/${operationId}`, { token: stranger.token });
-    expect(foreign.response.status).toBe(404);
-    expect(foreign.data.error.code).toBe("OPERATION_NOT_FOUND");
-    expect((await api(`/operations/${operationId}`)).response.status).toBe(401);
-
-    // Un ajeno no puede calificar; el comprador sí, pero una sola vez.
-    const foreignReview = await api(`/operations/${operationId}/reviews`, { method: "POST", token: stranger.token, body: { rating: 1 } });
-    expect(foreignReview.response.status).toBe(403);
-    expect(foreignReview.data.error.code).toBe("NOT_PARTICIPANT");
-
-    const review = await api(`/operations/${operationId}/reviews`, { method: "POST", token: buyer.token, body: { rating: 4, comment: "Todo salió bien" } });
-    expect(review.response.status).toBe(200);
-    const duplicate = await api(`/operations/${operationId}/reviews`, { method: "POST", token: buyer.token, body: { rating: 1 } });
-    expect(duplicate.response.status).toBe(409);
-    expect(duplicate.data.error.code).toBe("REVIEW_ALREADY_EXISTS");
-
-    const afterReview = (await api(`/operations/${operationId}`, { token: buyer.token })).data;
-    expect(afterReview).toMatchObject({ myRating: 4, canReview: false });
-    // El vendedor todavía puede calificar.
-    expect((await api(`/operations/${operationId}`, { token: seller.token })).data.canReview).toBe(true);
-
-    // Vencido el plazo: canReview pasa a false y el backend rechaza la reseña.
-    const eightDaysAgo = new Date(Date.now() - 8 * 86_400_000).toISOString();
-    db.run(sql`UPDATE operations SET completed_at = ${eightDaysAgo} WHERE id = ${operationId}`);
-    const expired = (await api(`/operations/${operationId}`, { token: seller.token })).data;
-    expect(expired.canReview).toBe(false);
-    expect(new Date(expired.reviewDeadline).getTime()).toBeLessThan(Date.now());
-    const late = await api(`/operations/${operationId}/reviews`, { method: "POST", token: seller.token, body: { rating: 5 } });
-    expect(late.data.error.code).toBe("REVIEW_WINDOW_EXPIRED");
-  });
-
-  test("consigna 2: los comentarios recibidos son públicos y paginados", async () => {
-    const seller = await register("reviews-seller@example.com", "Reviews Seller");
-    const buyers = [] as { id: string; token: string }[];
-    for (let index = 0; index < 3; index++) {
-      const buyer = await register(`reviews-buyer-${index}@example.com`, `Reviewer ${index}`);
-      buyers.push(buyer);
-      const publicationId = await publish(seller.token, { title: `Artículo reseñado ${index}`, category: "other", price: 10 });
-      const offer = await api(`/publications/${publicationId}/offers`, { method: "POST", token: buyer.token, body: { amount: 10 } });
-      const accepted = await api(`/offers/${offer.data.id}/respond`, { method: "POST", token: seller.token, body: { action: "accept" } });
-      await api(`/operations/${accepted.data.operationId}/reviews`, {
-        method: "POST",
-        token: buyer.token,
-        body: { rating: 5 - index, comment: `Comentario ${index}` },
-      });
-      // La reseña del vendedor al comprador no aparece en el perfil del vendedor.
-      await api(`/operations/${accepted.data.operationId}/reviews`, { method: "POST", token: seller.token, body: { rating: 3 } });
+});
+afterEach(() => { db.$client.close(); rmSync(temp, { recursive: true, force: true }); });
+
+describe("Hallado", () => {
+  test("salud, documentación y CORS", async () => {
+    expect((await api("/health")).data.status).toBe("ok");
+    const docs = await api("/docs");
+    expect(docs.data.name).toBe("Hallado API");
+    const documented = new Set(docs.data.routes.map((r: any) => `${r.method} ${r.path}`));
+    for (const route of app.routes.filter((r) => !["/", "/health", "/docs", "/*"].includes(r.path))) {
+      expect(documented.has(`${route.method} ${route.path}`)).toBe(true);
     }
-
-    const first = await api(`/users/${seller.id}/reviews?page=1&pageSize=2`);
-    expect(first.response.status).toBe(200);
-    expect(first.data.pagination).toEqual({ page: 1, pageSize: 2, total: 3, totalPages: 2 });
-    expect(first.data.items).toHaveLength(2);
-    expect(first.data.items[0]).toMatchObject({ comment: "Comentario 2", rating: 3, reviewerName: "Reviewer 2", operationType: "sell" });
-    expect(Object.keys(first.data.items[0]).sort()).toEqual(["comment", "createdAt", "id", "operationType", "rating", "reviewerName"]);
-
-    const second = await api(`/users/${seller.id}/reviews?page=2&pageSize=2`);
-    expect(second.data.items).toHaveLength(1);
-    expect(second.data.items[0].comment).toBe("Comentario 0");
-
-    // Desde el punto de vista del comprador calificado, la operación fue una compra.
-    const asBuyer = await api(`/users/${buyers[0]!.id}/reviews`);
-    expect(asBuyer.data.items[0]).toMatchObject({ rating: 3, reviewerName: "Reviews Seller", operationType: "buy" });
-
-    const missing = await api(`/users/${crypto.randomUUID()}/reviews`);
-    expect(missing.response.status).toBe(404);
-    expect(missing.data.error.code).toBe("USER_NOT_FOUND");
+    const options = await api("/publicaciones", "OPTIONS");
+    expect(options.response.status).toBe(204);
+    expect(options.response.headers.get("access-control-allow-origin")).toBe("*");
   });
-
-  test("consigna 7: ofertas con portada, contraparte y novedades (unreadCount / read)", async () => {
-    const seller = await register("news-seller@example.com", "News Seller");
-    const buyer = await register("news-buyer@example.com", "News Buyer");
-    const stranger = await register("news-stranger@example.com", "News Stranger");
-    const publicationId = await publish(seller.token, { title: "Amplificador", category: "electronics", price: 300 });
-
-    const offer = await api(`/publications/${publicationId}/offers`, { method: "POST", token: buyer.token, body: { amount: 250 } });
-
-    // La nueva oferta es una novedad para el vendedor, no para quien la hizo.
-    const sellerView = await api("/me/offers", { token: seller.token });
-    expect(sellerView.data.unreadCount).toBe(1);
-    expect(sellerView.data.items[0]).toMatchObject({
-      role: "seller",
-      hasUpdate: true,
-      coverImage: "https://images.example.com/bike.jpg",
-      otherPartyId: buyer.id,
-      otherPartyName: "News Buyer",
-      otherPartyAvatarUrl: null,
-    });
-    const buyerView = await api("/me/offers", { token: buyer.token });
-    expect(buyerView.data.unreadCount).toBe(0);
-    expect(buyerView.data.items[0]).toMatchObject({ role: "buyer", hasUpdate: false, otherPartyId: seller.id, otherPartyName: "News Seller" });
-
-    // Leer limpia sólo las novedades propias.
-    expect((await api("/me/offers/read", { method: "POST", token: seller.token })).data.unreadCount).toBe(0);
-    expect((await api("/me/offers", { token: seller.token })).data.unreadCount).toBe(0);
-
-    // La contraoferta le avisa al comprador; su respuesta le avisa al vendedor.
-    await api(`/offers/${offer.data.id}/respond`, { method: "POST", token: seller.token, body: { action: "counter", counterAmount: 280 } });
-    expect((await api("/me/offers", { token: buyer.token })).data.unreadCount).toBe(1);
-    expect((await api("/me/offers", { token: seller.token })).data.unreadCount).toBe(0);
-    await api("/me/offers/read", { method: "POST", token: buyer.token });
-    await api(`/offers/${offer.data.id}/respond-to-counter`, { method: "POST", token: buyer.token, body: { action: "accept" } });
-    const afterAccept = await api("/me/offers", { token: seller.token });
-    expect(afterAccept.data.unreadCount).toBe(1);
-    expect(afterAccept.data.items[0].status).toBe("accepted");
-
-    // Un tercero no tiene novedades ni puede leer las de otros.
-    expect((await api("/me/offers", { token: stranger.token })).data).toEqual({ items: [], unreadCount: 0 });
-    await api("/me/offers/read", { method: "POST", token: stranger.token });
-    expect((await api("/me/offers", { token: seller.token })).data.unreadCount).toBe(1);
-    expect((await api("/me/offers/read", { method: "POST" })).response.status).toBe(401);
+  test("registro por etapas: check no crea cuenta y verify exige contraseña", async () => {
+    const email = "new@example.com";
+    expect((await api("/auth/otp/request", "POST", { email, purpose: "registration" })).response.status).toBe(200);
+    const code = codes.get(`${email}:registration`)!;
+    const body = { email, code, purpose: "registration" };
+    expect((await api("/auth/otp/check", "POST", body)).data.valid).toBe(true);
+    expect(db.select().from(users).where(eq(users.email, email)).get()).toBeUndefined();
+    expect((await api("/auth/otp/verify", "POST", body)).data.error.code).toBe("PASSWORD_REQUIRED");
+    expect((await api("/auth/otp/verify", "POST", { ...body, password: "abcdefgh" })).data.error.code).toBe("INVALID_PASSWORD");
+    const completed = await api("/auth/otp/verify", "POST", { ...body, password });
+    expect(completed.response.status).toBe(200);
+    expect(completed.data.usuario.email).toBe(email);
+    expect((await api("/me", "GET", undefined, completed.data.session.token)).data.email).toBe(email);
+    expect((await api("/auth/otp/check", "POST", body)).response.status).toBe(400);
+    expect((await api("/auth/login/password", "POST", { email, password })).response.status).toBe(200);
+    expect((await api("/auth/otp/request", "POST", { email, purpose: "registration" })).response.status).toBe(409);
   });
-
-  test("consigna 7: detalle individual de una oferta, sólo para sus partes", async () => {
-    const seller = await register("detail-seller@example.com", "Detail Seller");
-    const buyer = await register("detail-buyer@example.com", "Detail Buyer");
-    const stranger = await register("detail-stranger@example.com", "Detail Stranger");
-    const publicationId = await publish(seller.token, { title: "Monitor", category: "electronics", price: 150 });
-    const offer = await api(`/publications/${publicationId}/offers`, { method: "POST", token: buyer.token, body: { amount: 120, message: "Hola" } });
-
-    const asBuyer = await api(`/offers/${offer.data.id}`, { token: buyer.token });
-    expect(asBuyer.response.status).toBe(200);
-    expect(asBuyer.data).toMatchObject({ id: offer.data.id, amount: 120, message: "Hola", role: "buyer", otherPartyId: seller.id, title: "Monitor" });
-    const listed = (await api("/me/offers", { token: buyer.token })).data.items.find((item: { id: string }) => item.id === offer.data.id);
-    expect(asBuyer.data).toEqual(listed);
-    expect((await api(`/offers/${offer.data.id}`, { token: seller.token })).data.role).toBe("seller");
-
-    const foreign = await api(`/offers/${offer.data.id}`, { token: stranger.token });
-    expect(foreign.response.status).toBe(404);
-    expect(foreign.data.error.code).toBe("OFFER_NOT_FOUND");
-    expect((await api(`/offers/${crypto.randomUUID()}`, { token: buyer.token })).response.status).toBe(404);
+  test("OTP vence, bloquea intentos, aplica espera y reemplaza códigos", async () => {
+    const email = "otp@example.com";
+    const body = { email, purpose: "registration" };
+    await api("/auth/otp/request", "POST", body);
+    const code = codes.get(`${email}:registration`)!;
+    expect((await api("/auth/otp/resend", "POST", body)).response.status).toBe(429);
+    for (let i = 0; i < 5; i++) {
+      const wrong = code === "111111" ? "222222" : "111111";
+      expect((await api("/auth/otp/check", "POST", { ...body, code: wrong })).response.status).toBe(400);
+    }
+    expect((await api("/auth/otp/check", "POST", { ...body, code })).response.status).toBe(429);
+    db.update(otpCodes).set({ createdAt: new Date(Date.now() - 60_000).toISOString() }).where(eq(otpCodes.email, email)).run();
+    await api("/auth/otp/resend", "POST", body);
+    expect(db.select().from(otpCodes).where(eq(otpCodes.email, email)).all().filter((o) => !o.consumedAt)).toHaveLength(1);
+    const fresh = codes.get(`${email}:registration`)!;
+    expect((await api("/auth/otp/check", "POST", { ...body, code: fresh })).response.status).toBe(200);
+    db.update(otpCodes).set({ expiresAt: new Date(Date.now() - 1000).toISOString() }).where(eq(otpCodes.email, email)).run();
+    expect((await api("/auth/otp/check", "POST", { ...body, code: fresh })).response.status).toBe(400);
   });
-
-  test("consigna 7: errores estables al responder ofertas vencidas o publicaciones inactivas", async () => {
-    const seller = await register("errors-seller@example.com", "Errors Seller");
-    const buyer = await register("errors-buyer@example.com", "Errors Buyer");
-    const publicationId = await publish(seller.token, { title: "Cámara", category: "electronics", price: 500 });
-
-    const offer = await api(`/publications/${publicationId}/offers`, { method: "POST", token: buyer.token, body: { amount: 450 } });
-    db.run(sql`UPDATE offers SET expires_at = ${new Date(Date.now() - 1000).toISOString()} WHERE id = ${offer.data.id}`);
-
-    const respondExpired = await api(`/offers/${offer.data.id}/respond`, { method: "POST", token: seller.token, body: { action: "accept" } });
-    expect(respondExpired.response.status).toBe(409);
-    expect(respondExpired.data.error.code).toBe("OFFER_EXPIRED");
-    const cancelExpired = await api(`/offers/${offer.data.id}/cancel`, { method: "POST", token: buyer.token });
-    expect(cancelExpired.data.error.code).toBe("OFFER_EXPIRED");
-    // Vencer también es una novedad para ambas partes.
-    expect((await api("/me/offers", { token: buyer.token })).data.items[0]).toMatchObject({ status: "expired", hasUpdate: true });
-
-    const counterExpired = await api(`/offers/${offer.data.id}/respond-to-counter`, { method: "POST", token: buyer.token, body: { action: "accept" } });
-    expect(counterExpired.data.error.code).toBe("OFFER_EXPIRED");
-
-    // Ofertar o preguntar en una publicación pausada o vendida -> PUBLICATION_NOT_ACTIVE.
-    await api(`/publications/${publicationId}/status`, { method: "PATCH", token: seller.token, body: { status: "paused" } });
-    const onPaused = await api(`/publications/${publicationId}/offers`, { method: "POST", token: buyer.token, body: { amount: 400 } });
-    expect(onPaused.response.status).toBe(409);
-    expect(onPaused.data.error.code).toBe("PUBLICATION_NOT_ACTIVE");
-    const askPaused = await api(`/publications/${publicationId}/questions`, { method: "POST", token: buyer.token, body: { text: "¿Sigue disponible?" } });
-    expect(askPaused.data.error.code).toBe("PUBLICATION_NOT_ACTIVE");
-    const missing = await api(`/publications/${crypto.randomUUID()}/offers`, { method: "POST", token: buyer.token, body: { amount: 400 } });
-    expect(missing.response.status).toBe(404);
-    expect(missing.data.error.code).toBe("PUBLICATION_NOT_FOUND");
+  test("un OTP no crea dos cuentas con finalizaciones simultáneas", async () => {
+    const email = "race@example.com";
+    await api("/auth/otp/request", "POST", { email, purpose: "registration" });
+    const body = { email, purpose: "registration", code: codes.get(`${email}:registration`), password };
+    const results = await Promise.all([api("/auth/otp/verify", "POST", body), api("/auth/otp/verify", "POST", body)]);
+    expect(results.map((r) => r.response.status).sort()).toEqual([200, 400]);
+    const u = db.select().from(users).where(eq(users.email, email)).all();
+    expect(u).toHaveLength(1);
+    expect(db.select().from(sessions).where(eq(sessions.userId, u[0]!.id)).all()).toHaveLength(1);
   });
-
-  test("consigna 7/8: aceptar una oferta es atómico (operación, venta, otras ofertas y dirección)", async () => {
-    const seller = await register("atomic-seller@example.com", "Atomic Seller");
-    const winner = await register("atomic-winner@example.com", "Atomic Winner");
-    const loser = await register("atomic-loser@example.com", "Atomic Loser");
-    const publicationId = await publish(seller.token, { title: "Kayak", category: "sports", price: 900 });
-
-    const winning = await api(`/publications/${publicationId}/offers`, { method: "POST", token: winner.token, body: { amount: 800 } });
-    const losing = await api(`/publications/${publicationId}/offers`, { method: "POST", token: loser.token, body: { amount: 700 } });
-    await api("/me/offers/read", { method: "POST", token: loser.token });
-
-    const accepted = await api(`/offers/${winning.data.id}/respond`, { method: "POST", token: seller.token, body: { action: "accept" } });
-    expect(accepted.data.status).toBe("accepted");
-
-    expect((await api(`/publications/${publicationId}`, { token: seller.token })).data.status).toBe("sold");
-    const losingOffer = (await api(`/offers/${losing.data.id}`, { token: loser.token })).data;
-    expect(losingOffer).toMatchObject({ status: "rejected", hasUpdate: true });
-    expect((await api("/me/operations", { token: winner.token })).data.items).toHaveLength(1);
-    expect((await api("/me/operations", { token: loser.token })).data.items).toHaveLength(0);
-
-    // La dirección se desbloquea sólo para comprador y vendedor.
-    expect((await api(`/publications/${publicationId}`, { token: winner.token })).data.addressLocked).toBe(false);
-    const asLoser = await api(`/publications/${publicationId}`, { token: loser.token });
-    expect(asLoser.data.addressLocked).toBe(true);
-    expect(asLoser.data.address).toBeNull();
-
-    // Ya no se puede volver a aceptar (ni la ganadora ni la descartada).
-    const again = await api(`/offers/${winning.data.id}/respond`, { method: "POST", token: seller.token, body: { action: "accept" } });
-    expect(again.data.error.code).toBe("OFFER_ALREADY_RESOLVED");
-    const discarded = await api(`/offers/${losing.data.id}/respond`, { method: "POST", token: seller.token, body: { action: "accept" } });
-    expect(discarded.data.error.code).toBe("OFFER_ALREADY_RESOLVED");
+  test("recupero cambia contraseña, revoca sesiones y no revela emails inexistentes", async () => {
+    const email = accounts[0]!.email;
+    const unknown = await api("/auth/otp/request", "POST", { email: "unknown@example.com", purpose: "set_password" });
+    const known = await api("/auth/otp/request", "POST", { email, purpose: "set_password" });
+    expect(unknown.data.message).toBe(known.data.message);
+    expect(codes.has("unknown@example.com:set_password")).toBe(false);
+    const result = await api("/auth/otp/verify", "POST", { email, purpose: "set_password", code: codes.get(`${email}:set_password`), password: "Nueva12345" });
+    expect(result.response.status).toBe(200);
+    expect((await api("/me", "GET", undefined, accounts[0]!.token)).response.status).toBe(401);
+    expect((await api("/auth/login/password", "POST", { email, password })).response.status).toBe(401);
+    expect((await api("/auth/login/password", "POST", { email, password: "Nueva12345" })).response.status).toBe(200);
   });
-
-  test("consigna 7/8: si la publicación dejó de estar activa, aceptar no persiste nada", async () => {
-    const seller = await register("rollback-seller@example.com", "Rollback Seller");
-    const buyer = await register("rollback-buyer@example.com", "Rollback Buyer");
-    const publicationId = await publish(seller.token, { title: "Carpa", category: "sports", price: 250 });
-    const offer = await api(`/publications/${publicationId}/offers`, { method: "POST", token: buyer.token, body: { amount: 200 } });
-
-    await api(`/publications/${publicationId}/status`, { method: "PATCH", token: seller.token, body: { status: "paused" } });
-    const accept = await api(`/offers/${offer.data.id}/respond`, { method: "POST", token: seller.token, body: { action: "accept" } });
-    expect(accept.response.status).toBe(409);
-    expect(accept.data.error.code).toBe("PUBLICATION_NOT_ACTIVE");
-
-    // La oferta sigue pendiente y no se creó ninguna operación.
-    expect((await api(`/offers/${offer.data.id}`, { token: seller.token })).data.status).toBe("pending");
-    expect((await api("/me/operations", { token: buyer.token })).data.items).toHaveLength(0);
+  test("login limita intentos fallidos y logout invalida el token", async () => {
+    const email = accounts[0]!.email;
+    for (let i = 0; i < 5; i++) expect((await api("/auth/login/password", "POST", { email, password: "Wrong123" })).response.status).toBe(401);
+    expect((await api("/auth/login/password", "POST", { email, password })).response.status).toBe(429);
+    db.update(loginAttempts).set({ windowStart: new Date(Date.now() - 901_000).toISOString() }).run();
+    const login = await api("/auth/login/password", "POST", { email, password });
+    expect(login.response.status).toBe(200);
+    const token = login.data.session.token;
+    expect((await api("/auth/logout", "POST", undefined, token)).response.status).toBe(200);
+    expect((await api("/me", "GET", undefined, token)).response.status).toBe(401);
+  });
+  test("recuperar desbloquea login y revoca OTP de acceso anteriores", async () => {
+    const email = accounts[0]!.email;
+    await api("/auth/otp/request", "POST", { email, purpose: "login" });
+    const oldCode = codes.get(`${email}:login`)!;
+    const wrongs = await Promise.all(Array.from({ length: 5 }, () => api("/auth/login/password", "POST", { email, password: "Wrong123" })));
+    expect(wrongs.every((r) => r.response.status === 401)).toBe(true);
+    expect((await api("/auth/login/password", "POST", { email, password })).response.status).toBe(429);
+    await api("/auth/otp/request", "POST", { email, purpose: "set_password" });
+    const reset = await api("/auth/otp/verify", "POST", { email, code: codes.get(`${email}:set_password`), purpose: "set_password", password: "Reset12345" });
+    expect(reset.response.status).toBe(200);
+    expect((await api("/auth/otp/verify", "POST", { email, code: oldCode, purpose: "login" })).response.status).toBe(400);
+    expect((await api("/auth/login/password", "POST", { email, password: "Reset12345" })).response.status).toBe(200);
+  });
+  test("si el envío falla, no queda un OTP utilizable ni espera de reenvío", async () => {
+    const badApp = createApp(db, { uploadsPath: temp, sendOtp: async () => { throw new (await import("../src/errors")).ApiError(503, "EMAIL_DELIVERY_FAILED", "Falló el envío"); } });
+    const response = await badApp.handle(new Request("http://localhost/auth/otp/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "fail@example.com", purpose: "registration" }) }));
+    expect(response.status).toBe(503);
+    expect(db.select().from(otpCodes).where(eq(otpCodes.email, "fail@example.com")).all()).toHaveLength(0);
+  });
+  test("perfil privado editable y perfil público sin teléfono, email ni historial", async () => {
+    const token = accounts[0]!.token;
+    const update = await api("/me", "PATCH", { name: "Federico", phone: "1155551234", zone: "Centro", sharePhone: false }, token);
+    expect(update.data.name).toBe("Federico");
+    expect(update.data.sharePhone).toBe(false);
+    const profile = (await api(`/usuarios/${accounts[0]!.id}`)).data;
+    expect(profile.phone).toBeUndefined(); expect(profile.email).toBeUndefined(); expect(profile.publications).toBeUndefined();
+    expect(profile.reputation.completedReturns).toBe(0);
+    expect((await api("/me", "PATCH", { name: "   " }, token)).response.status).toBe(422);
+  });
+  test("búsqueda devuelve el tipo opuesto y filtra barrio, palabras, fechas y categoría", async () => {
+    const target = await publish();
+    await publish({ tipo: "perdi" });
+    await publish({ barrio: "Belgrano" });
+    await publish({ categoria: "Otros" });
+    await publish({ fecha: "2020-01-01" });
+    const result = await api(query({ palabras: "LLÁVES AZUL", periodo: "hoy" }));
+    expect(result.data.total).toBe(1); expect(result.data.items[0].id).toBe(target.id);
+    expect((await api(query({ situacion: "encontre" }))).data.total).toBe(1);
+    expect((await api(query({ palabras: "inexistente" }))).data.total).toBe(0);
+  });
+  test("búsqueda pagina, ordena por cercanía y limita radio GPS", async () => {
+    await publish({ titulo: "Más lejos", ubicacion: { latitud: -34.59, longitud: -58.43 } });
+    const near = await publish({ titulo: "Más cerca", ubicacion: { latitud: -34.5889, longitud: -58.4306 } });
+    const result = await api(query({ orden: "cercanos", pageSize: "1" }));
+    expect(result.data.total).toBe(2); expect(result.data.totalPages).toBe(2); expect(result.data.items[0].id).toBe(near.id);
+    const gps = await api(query({ zona: "", latitud: "-34.5889", longitud: "-58.4306", radioKm: "0.1" }));
+    expect(gps.data.total).toBe(1);
+    expect((await api(query({ pageSize: "0" }))).response.status).toBe(422);
+    expect((await api(query({ orden: "inventado" }))).response.status).toBe(422);
+  });
+  test("valida filtros, coordenadas y fechas imposibles o futuras", async () => {
+    expect((await api(query({ periodo: "rango", desde: "2026-02-30", hasta: localDate() }))).response.status).toBe(422);
+    expect((await api(query({ periodo: "rango", desde: localDate(), hasta: "2020-01-01" }))).response.status).toBe(422);
+    expect((await api(query({ zona: "" }))).response.status).toBe(422);
+    expect((await api(query({ zona: "", latitud: "91", longitud: "0" }))).response.status).toBe(422);
+    expect((await api("/publicaciones", "POST", postBody({ fecha: "2099-12-31" }), accounts[0]!.token)).response.status).toBe(422);
+    expect((await api("/publicaciones", "POST", postBody({ titulo: "    " }), accounts[0]!.token)).response.status).toBe(422);
+  });
+  test("historial conserva cinco búsquedas únicas del usuario", async () => {
+    for (let i = 0; i < 7; i++) await api(query({ palabras: `palabra${i}` }), "GET", undefined, accounts[0]!.token);
+    await api(query({ palabras: "palabra6" }), "GET", undefined, accounts[0]!.token);
+    const history = (await api("/me/busquedas", "GET", undefined, accounts[0]!.token)).data.items;
+    expect(history).toHaveLength(5);
+    expect(history.filter((r: any) => r.filtros.palabras === "palabra6")).toHaveLength(1);
+    expect((await api("/me/busquedas", "GET", undefined, accounts[1]!.token)).data.items).toHaveLength(0);
+  });
+  test("solo el propietario puede editar o eliminar y la eliminación oculta resultados", async () => {
+    const p = await publish();
+    expect((await api(`/publicaciones/${p.id}`, "PATCH", { titulo: "Otro título" }, accounts[1]!.token)).response.status).toBe(403);
+    expect((await api(`/publicaciones/${p.id}`, "DELETE", undefined, accounts[1]!.token)).response.status).toBe(403);
+    expect((await api(`/publicaciones/${p.id}`, "PATCH", { titulo: "Título actualizado" }, accounts[0]!.token)).data.titulo).toBe("Título actualizado");
+    expect((await api(`/publicaciones/${p.id}`, "DELETE", undefined, accounts[0]!.token)).response.status).toBe(200);
+    expect((await api(`/publicaciones/${p.id}`)).response.status).toBe(404);
+    expect((await api(query())).data.total).toBe(0);
+  });
+  test("la dirección y el teléfono solo se habilitan a las partes del reclamo aceptado", async () => {
+    const p = await publish(); const c = await claim(p.id);
+    expect((await api(`/publicaciones/${p.id}`)).data.direccionExacta).toBeNull();
+    expect((await api(`/publicaciones/${p.id}`, "GET", undefined, accounts[1]!.token)).data.publicador.phone).toBeUndefined();
+    expect((await api(`/publicaciones/${p.id}/reclamos`, "GET", undefined, accounts[0]!.token)).data.items[0].telefono).toBeNull();
+    await api(`/reclamos/${c.id}/aceptar`, "POST", undefined, accounts[0]!.token);
+    const accepted = (await api(`/publicaciones/${p.id}`, "GET", undefined, accounts[1]!.token)).data;
+    expect(accepted.direccionExacta).toBe("Calle privada 123"); expect(accepted.publicador.phone).toBe("1155550000");
+    const stranger = (await api(`/publicaciones/${p.id}`, "GET", undefined, accounts[2]!.token)).data;
+    expect(stranger.direccionExacta).toBeNull(); expect(stranger.publicador.phone).toBeUndefined();
+    await api("/me", "PATCH", { sharePhone: false }, accounts[0]!.token);
+    expect((await api(`/publicaciones/${p.id}`, "GET", undefined, accounts[1]!.token)).data.publicador.phone).toBeUndefined();
+  });
+  test("rechazar o cancelar revoca datos privados y reabre la publicación", async () => {
+    const p = await publish(); const c = await accept(p.id);
+    expect((await api(`/reclamos/${c.id}/rechazar`, "POST", undefined, accounts[0]!.token)).response.status).toBe(200);
+    const result = await api(`/publicaciones/${p.id}`, "GET", undefined, accounts[1]!.token);
+    expect(result.data.estado).toBe("abierta"); expect(result.data.direccionExacta).toBeNull();
+    const again = await claim(p.id);
+    await api(`/reclamos/${again.id}/aceptar`, "POST", undefined, accounts[0]!.token);
+    expect((await api(`/reclamos/${again.id}/cancelar`, "POST", undefined, accounts[1]!.token)).response.status).toBe(200);
+    expect((await api(`/publicaciones/${p.id}`)).data.estado).toBe("abierta");
+  });
+  test("no admite reclamos propios, duplicados ni dos aceptados", async () => {
+    const p = await publish();
+    expect((await api(`/publicaciones/${p.id}/reclamos`, "POST", { mensaje: "Son mis llaves." }, accounts[0]!.token)).response.status).toBe(409);
+    const c1 = await claim(p.id); const c2 = await claim(p.id, 2);
+    expect((await api(`/publicaciones/${p.id}/reclamos`, "POST", { mensaje: "Otra vez mis llaves." }, accounts[1]!.token)).response.status).toBe(409);
+    const results = await Promise.all([api(`/reclamos/${c1.id}/aceptar`, "POST", undefined, accounts[0]!.token), api(`/reclamos/${c2.id}/aceptar`, "POST", undefined, accounts[0]!.token)]);
+    expect(results.map((r) => r.response.status).sort()).toEqual([200, 409]);
+    expect(db.select().from(claims).where(eq(claims.estado, "aceptado")).all()).toHaveLength(1);
+    expect((await api(`/publicaciones/${p.id}`, "PATCH", { titulo: "Cambio indebido" }, accounts[0]!.token)).response.status).toBe(409);
+  });
+  test("mensajería privada requiere reclamo aceptado y las partes correctas", async () => {
+    const p = await publish(); const c = await claim(p.id);
+    expect((await api(`/reclamos/${c.id}/mensajes`, "POST", { texto: "Hola" }, accounts[1]!.token)).response.status).toBe(409);
+    await api(`/reclamos/${c.id}/aceptar`, "POST", undefined, accounts[0]!.token);
+    expect((await api(`/reclamos/${c.id}/mensajes`, "POST", { texto: "Hola, coordinamos?" }, accounts[1]!.token)).response.status).toBe(201);
+    expect((await api(`/reclamos/${c.id}/mensajes`, "GET", undefined, accounts[0]!.token)).data.items).toHaveLength(1);
+    expect((await api(`/reclamos/${c.id}/mensajes`, "GET", undefined, accounts[2]!.token)).response.status).toBe(403);
+    expect((await api(`/publicaciones/${p.id}/reclamos`, "GET", undefined, accounts[2]!.token)).response.status).toBe(403);
+  });
+  test("resolver requiere aceptación y las valoraciones solo pertenecen a las partes", async () => {
+    const p = await publish();
+    expect((await api(`/publicaciones/${p.id}/resolver`, "POST", undefined, accounts[0]!.token)).response.status).toBe(409);
+    const c = await accept(p.id);
+    expect((await api(`/publicaciones/${p.id}/valoraciones`, "POST", { positiva: true }, accounts[0]!.token)).response.status).toBe(409);
+    expect((await api(`/publicaciones/${p.id}/resolver`, "POST", undefined, accounts[1]!.token)).response.status).toBe(403);
+    expect((await api(`/publicaciones/${p.id}/resolver`, "POST", undefined, accounts[0]!.token)).response.status).toBe(200);
+    expect((await api(`/publicaciones/${p.id}/valoraciones`, "POST", { positiva: true }, accounts[2]!.token)).response.status).toBe(403);
+    expect((await api(`/publicaciones/${p.id}/valoraciones`, "POST", { positiva: true, comentario: "Gracias" }, accounts[0]!.token)).response.status).toBe(201);
+    expect((await api(`/publicaciones/${p.id}/valoraciones`, "POST", { positiva: false }, accounts[1]!.token)).response.status).toBe(201);
+    expect((await api(`/publicaciones/${p.id}/valoraciones`, "POST", { positiva: true }, accounts[0]!.token)).response.status).toBe(409);
+    expect((await api(`/reclamos/${c.id}/rechazar`, "POST", undefined, accounts[0]!.token)).response.status).toBe(409);
+    const a = (await api(`/usuarios/${accounts[0]!.id}`)).data;
+    const b = (await api(`/usuarios/${accounts[1]!.id}`)).data;
+    expect(a.reputation).toEqual({ completedReturns: 1, positiveReviews: 0, negativeReviews: 1 });
+    expect(b.reputation).toEqual({ completedReturns: 1, positiveReviews: 1, negativeReviews: 0 });
+  });
+  test("Vecino solidario aparece tras cinco devoluciones reales", async () => {
+    for (let i = 0; i < 5; i++) {
+      const p = await publish({ titulo: `Devolución ${i}` }); await accept(p.id);
+      await api(`/publicaciones/${p.id}/resolver`, "POST", undefined, accounts[0]!.token);
+    }
+    const profile = (await api(`/usuarios/${accounts[0]!.id}`)).data;
+    expect(profile.reputation.completedReturns).toBe(5); expect(profile.badges[0].name).toBe("Vecino solidario");
+  });
+  test("seguidores reciben novedades y dejar de seguir es idempotente", async () => {
+    const p = await publish();
+    await api(`/publicaciones/${p.id}/seguir`, "POST", undefined, accounts[2]!.token);
+    await api(`/publicaciones/${p.id}/seguir`, "POST", undefined, accounts[2]!.token);
+    expect((await api("/me/seguidas", "GET", undefined, accounts[2]!.token)).data.total).toBe(1);
+    await api(`/publicaciones/${p.id}`, "PATCH", { titulo: "Llaves actualizadas" }, accounts[0]!.token);
+    expect((await api("/notificaciones", "GET", undefined, accounts[2]!.token)).data.sinLeer).toBe(1);
+    await api(`/publicaciones/${p.id}/seguir`, "DELETE", undefined, accounts[2]!.token);
+    await api(`/publicaciones/${p.id}/seguir`, "DELETE", undefined, accounts[2]!.token);
+    expect((await api("/me/seguidas", "GET", undefined, accounts[2]!.token)).data.total).toBe(0);
+  });
+  test("alertas detectan coincidencias, deduplican y respetan dueño y estado", async () => {
+    const token = accounts[1]!.token;
+    const alert = await api("/alertas", "POST", { filtros: filters }, token);
+    expect(alert.response.status).toBe(201);
+    expect((await api("/alertas", "POST", { filtros: filters }, token)).data.id).toBe(alert.data.id);
+    const p = await publish();
+    await api(`/publicaciones/${p.id}`, "PATCH", { titulo: "Llaves nuevas" }, accounts[0]!.token);
+    const notifs = (await api("/notificaciones", "GET", undefined, token)).data;
+    expect(notifs.items).toHaveLength(1); expect(notifs.items[0].tipo).toBe("coincidencia");
+    expect((await api(`/alertas/${alert.data.id}`, "PATCH", { activa: false }, accounts[2]!.token)).response.status).toBe(404);
+    await api(`/alertas/${alert.data.id}`, "PATCH", { activa: false }, token);
+    await publish({ titulo: "Llaves de otra persona" });
+    expect((await api("/notificaciones", "GET", undefined, token)).data.total).toBe(1);
+    await api(`/alertas/${alert.data.id}`, "PATCH", { activa: true }, token);
+    expect((await api("/notificaciones", "GET", undefined, token)).data.total).toBe(2);
+    expect((await api(`/notificaciones/${notifs.items[0].id}/leida`, "POST", undefined, accounts[2]!.token)).response.status).toBe(404);
+    await api(`/alertas/${alert.data.id}/leida`, "POST", undefined, token);
+    expect((await api("/notificaciones", "GET", undefined, token)).data.sinLeer).toBe(0);
+  });
+  test("fotos se suben y sirven, pero no se pueden adjuntar fotos ajenas", async () => {
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a++sAAAAASUVORK5CYII=", "base64");
+    const form = new FormData(); form.set("file", new File([png], "image.png", { type: "image/png" }));
+    const result = await api("/uploads/images", "POST", form, accounts[0]!.token);
+    expect(result.response.status).toBe(201);
+    const image = await app.handle(new Request(`http://localhost${result.data.url}`));
+    expect(image.status).toBe(200); expect(image.headers.get("content-type")).toContain("image/png");
+    expect(Buffer.from(await image.arrayBuffer()).equals(png)).toBe(true);
+    const p = await publish({ fotos: [result.data.url] }); expect(p.fotos).toHaveLength(1);
+    expect((await api("/me", "PATCH", { avatarUrl: result.data.url }, accounts[0]!.token)).data.avatarUrl).toBe(result.data.url);
+    expect((await api("/me", "PATCH", { avatarUrl: result.data.url }, accounts[1]!.token)).response.status).toBe(403);
+    expect((await api("/publicaciones", "POST", postBody({ fotos: [result.data.url] }), accounts[1]!.token)).response.status).toBe(403);
+    expect((await api("/publicaciones", "POST", postBody({ fotos: ["file:///local/photo.jpg"] }), accounts[0]!.token)).response.status).toBe(422);
+    const bad = new FormData(); bad.set("file", new File(["<svg/>"], "x.png", { type: "image/png" }));
+    expect((await api("/uploads/images", "POST", bad, accounts[0]!.token)).response.status).toBe(422);
+  });
+  test("sesiones vencidas y escrituras anónimas se rechazan", async () => {
+    db.update(sessions).set({ expiresAt: new Date(Date.now() - 1000).toISOString() }).where(eq(sessions.userId, accounts[0]!.id)).run();
+    expect((await api("/me", "GET", undefined, accounts[0]!.token)).response.status).toBe(401);
+    expect((await api("/publicaciones", "POST", postBody())).response.status).toBe(401);
+    expect((await api("/me")).response.status).toBe(401);
+  });
+  test("migración sobre TP1 conserva usuarios y añade consentimiento de teléfono", () => {
+    const folder = join(temp, "old-migrations");
+    for (const name of readdirSync(new URL("../drizzle", import.meta.url))) {
+      if (name.startsWith("2026") && !name.startsWith("202610")) cpSync(new URL(`../drizzle/${name}`, import.meta.url), join(folder, name), { recursive: true });
+    }
+    const path = join(temp, "legacy.sqlite");
+    const raw = new Database(path, { create: true });
+    const old = drizzle({ client: raw }); migrate(old, { migrationsFolder: folder });
+    raw.run("INSERT INTO users (id,email,name,created_at,email_verified_at) VALUES (?,?,?,?,?)", ["legacy-user", "legacy@example.com", "Usuario previo", nowIso(), nowIso()]);
+    raw.close();
+    const upgraded = createDatabase(path);
+    const user = upgraded.select().from(users).where(eq(users.id, "legacy-user")).get()!;
+    expect(user.name).toBe("Usuario previo"); expect(user.sharePhone).toBe(false);
+    expect(upgraded.select().from(posts).all()).toHaveLength(0);
+    upgraded.$client.close();
+  });
+  test("reabrir SQLite mantiene las publicaciones", () => {
+    const path = join(temp, "persist.sqlite");
+    let disk = createDatabase(path);
+    disk.insert(users).values({ id: "persist-user", email: "persist@example.com", name: "Persistente", createdAt: nowIso(), emailVerifiedAt: nowIso() }).run();
+    disk.insert(posts).values({ id: "persist-post", userId: "persist-user", ...postBody(), tipo: "encontrado", categoria: "Llaves", franja: "tarde", latitud: -34, longitud: -58, createdAt: nowIso(), updatedAt: nowIso() }).run();
+    disk.$client.close(); disk = createDatabase(path);
+    expect(disk.select().from(posts).get()!.titulo).toBe("Llaves con llavero azul");
+    disk.$client.close();
+  });
+  test("Resend: carga correcta y error del proveedor sin envío externo", async () => {
+    const oldMode = config.emailMode;
+    const originalFetch = globalThis.fetch;
+    try {
+      Object.assign(config, { emailMode: "resend" });
+      let sent: any;
+      globalThis.fetch = (async (_url: any, options: any) => { sent = JSON.parse(options.body); return Response.json({ id: "mock-id" }); }) as typeof fetch;
+      await sendOtp({ email: "test@example.com", code: "123456", purpose: "registration" });
+      expect(sent.to).toEqual(["test@example.com"]); expect(sent.text).toContain("123456");
+      globalThis.fetch = (async () => new Response("error", { status: 503 })) as unknown as typeof fetch;
+      await expect(sendOtp({ email: "test@example.com", code: "123456", purpose: "registration" })).rejects.toMatchObject({ code: "EMAIL_DELIVERY_FAILED" });
+    } finally { Object.assign(config, { emailMode: oldMode }); globalThis.fetch = originalFetch; }
   });
 });

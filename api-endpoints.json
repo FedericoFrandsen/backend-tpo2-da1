@@ -1,721 +1,210 @@
 {
-  "name": "Marketplace API",
-  "description": "Contrato de la API tal como queda implementada en src/. Refleja también los cambios de contrato pedidos por el cliente Android (contraparte normalizada, calificación gobernada por el servidor, comentarios públicos, detalle de oferta/operación, novedades en ofertas, aceptación atómica y errores estables).",
-  "conventions": {
-    "baseUrl": "http://localhost:3001",
-    "contentType": "application/json (salvo POST /uploads/images, que es multipart/form-data)",
-    "auth": "Authorization: Bearer <session.token>. `required` = 401 sin sesión válida; `optional` = funciona sin token pero personaliza la respuesta; `none` = pública.",
-    "types": "string, uuid, date-time (ISO 8601 UTC), uri, integer, number, boolean. `T|null` admite null. `a|b|c` es un enum. En bodies/queries, una clave terminada en `?` es opcional. `{ \"$ref\": \"X\" }` remite a `schemas.X`.",
-    "money": "Los montos viajan en unidades de moneda (ej. 425.5), nunca en centavos, salvo `priceCents` en las respuestas de POST/PATCH /publications y GET /me/publications (ver schemas.PublicationRow).",
-    "pagination": "page (>=1, default 1) y pageSize (default 20, máximo 50). Respuesta: { items, pagination: { page, pageSize, total, totalPages } }.",
-    "errors": {
-      "shape": { "error": { "code": "string", "message": "string" } },
-      "note": "Toda respuesta de error usa siempre esta forma. El cliente debe decidir por `code`, no por `message` ni por el status HTTP."
-    },
-    "cors": "Access-Control-Allow-Origin: * ; métodos GET, POST, PATCH, DELETE, OPTIONS ; headers authorization y content-type."
-  },
-  "errorCodes": {
-    "global": {
-      "UNAUTHORIZED": "401 - falta el header Bearer",
-      "INVALID_SESSION": "401 - la sesión no existe o venció",
-      "VALIDATION_ERROR": "422 - body/query/params con formato inválido",
-      "ROUTE_NOT_FOUND": "404 - ruta inexistente",
-      "INTERNAL_ERROR": "500 - error no controlado"
-    },
-    "offers": {
-      "OFFER_NOT_FOUND": "404 - la oferta no existe o el usuario no participa de ella",
-      "OFFER_EXPIRED": "409 - la oferta venció (plazo de vigencia cumplido)",
-      "OFFER_ALREADY_RESOLVED": "409 - la oferta ya fue aceptada, rechazada, cancelada o no está en el estado esperado para esa acción",
-      "PUBLICATION_NOT_ACTIVE": "409 - la publicación está pausada o ya vendida (al ofertar, preguntar o aceptar)",
-      "COUNTER_AMOUNT_REQUIRED": "400 - action=counter sin counterAmount",
-      "OWN_PUBLICATION": "400 - acción sobre la propia publicación",
-      "NOT_OWNER": "403 - la acción le corresponde a la otra parte"
-    },
-    "operations": {
-      "OPERATION_NOT_FOUND": "404 - la operación no existe o el usuario no participa de ella (detalle) / no existe (calificar)",
-      "NOT_PARTICIPANT": "403 - sólo las partes de la operación pueden calificar",
-      "REVIEW_ALREADY_EXISTS": "409 - el usuario ya calificó esta operación",
-      "REVIEW_WINDOW_EXPIRED": "409 - pasaron más de 7 días desde completedAt"
-    },
-    "reserved": {
-      "ADDRESS_LOCKED": "Código reservado. Ningún endpoint lo devuelve hoy: la dirección bloqueada se informa con `addressLocked: true` y `address: null` en GET /publications/:id."
-    },
-    "other": {
-      "EMAIL_ALREADY_REGISTERED": "409",
-      "USERNAME_TAKEN": "409",
-      "USER_NOT_FOUND": "404",
-      "OTP_RATE_LIMIT": "429 - hay que esperar 30 s entre códigos",
-      "OTP_EXPIRED": "400",
-      "OTP_INVALID": "400",
-      "OTP_LOCKED": "429 - 5 intentos fallidos",
-      "PASSWORD_REQUIRED": "422 - purpose=set_password sin password",
-      "INVALID_CREDENTIALS": "401",
-      "PUBLICATION_NOT_FOUND": "404",
-      "PUBLICATION_SOLD": "409 - una publicación vendida no se edita",
-      "INVALID_STATUS_TRANSITION": "409 - sólo active<->paused",
-      "INVALID_PRICE_RANGE": "400 - minPrice > maxPrice",
-      "INVALID_IMAGE": "400",
-      "IMAGE_NOT_FOUND": "404",
-      "QUESTION_NOT_FOUND": "404",
-      "SAVED_SEARCH_NOT_FOUND": "404"
+  "name": "Hallado API",
+  "version": "2.0.0",
+  "authentication": "Authorization: Bearer <session.token>",
+  "documentation": "README.md y docs/INTEGRACION.md",
+  "errors": {
+    "error": {
+      "code": "CODIGO_DEL_ERROR",
+      "message": "Mensaje legible"
     }
   },
-  "enums": {
-    "category": ["electronics", "home", "fashion", "sports", "vehicles", "books", "toys", "other"],
-    "condition": ["new", "like_new", "used"],
-    "publicationStatus": ["active", "paused", "sold"],
-    "sort": ["recent", "price_asc", "price_desc"],
-    "offerStatus": ["pending", "countered", "accepted", "rejected", "expired", "cancelled"],
-    "otpPurpose": ["registration", "login", "set_password"]
-  },
-  "schemas": {
-    "Pagination": { "page": "integer", "pageSize": "integer", "total": "integer", "totalPages": "integer" },
-    "Session": { "token": "string", "tokenType": "Bearer", "expiresAt": "date-time" },
-    "PublicUser": {
-      "id": "uuid",
-      "name": "string",
-      "zone": "string|null",
-      "avatarUrl": "uri|null",
-      "memberSince": "date-time",
-      "ratingAverage": "number (0 si no tiene reseñas)",
-      "ratingCount": "integer",
-      "purchasesCompleted": "integer",
-      "salesCompleted": "integer"
-    },
-    "Profile": {
-      "id": "uuid",
-      "email": "string",
-      "username": "string|null",
-      "name": "string",
-      "phone": "string|null",
-      "zone": "string|null",
-      "avatarUrl": "uri|null",
-      "createdAt": "date-time"
-    },
-    "PublicationSummary": {
-      "id": "uuid",
-      "title": "string",
-      "price": "number",
-      "itemCondition": "condition",
-      "zone": "string|null",
-      "publishedAt": "date-time",
-      "coverImage": "uri|null"
-    },
-    "Image": { "id": "uuid", "url": "uri", "position": "integer" },
-    "PublicationRow": {
-      "id": "uuid",
-      "sellerId": "uuid",
-      "title": "string",
-      "description": "string",
-      "category": "category",
-      "priceCents": "integer (centavos)",
-      "itemCondition": "condition",
-      "address": "string",
-      "status": "publicationStatus",
-      "publishedAt": "date-time",
-      "createdAt": "date-time",
-      "updatedAt": "date-time",
-      "zone": "string|null (siempre la zona actual del perfil del vendedor)",
-      "images": [{ "$ref": "Image" }]
-    },
-    "SavedSearch": {
-      "id": "uuid",
-      "userId": "uuid",
-      "name": "string",
-      "query": "string|null",
-      "category": "category|null",
-      "minPrice": "number|null",
-      "maxPrice": "number|null",
-      "condition": "condition|null",
-      "zone": "string|null",
-      "sort": "sort",
-      "unreadCount": "integer",
-      "createdAt": "date-time",
-      "lastCheckedAt": "date-time"
-    },
-    "Offer": {
-      "id": "uuid",
-      "publicationId": "uuid",
-      "title": "string (título de la publicación)",
-      "coverImage": "uri|null",
-      "amount": "number (monto ofertado)",
-      "counterAmount": "number|null (contraoferta del vendedor)",
-      "message": "string|null",
-      "status": "offerStatus",
-      "expiresAt": "date-time",
-      "createdAt": "date-time",
-      "role": "buyer|seller (rol de quien consulta)",
-      "otherPartyId": "uuid (la otra parte: el vendedor si role=buyer, el comprador si role=seller)",
-      "otherPartyName": "string",
-      "otherPartyAvatarUrl": "uri|null",
-      "hasUpdate": "boolean (novedad sin leer para quien consulta; se limpia con POST /me/offers/read)"
-    },
-    "Operation": {
-      "id": "uuid",
-      "publicationId": "uuid",
-      "title": "string",
-      "address": "string (dirección de entrega; las dos partes la conocen)",
-      "amount": "number (precio final acordado)",
-      "completedAt": "date-time",
-      "type": "buy|sell (rol de quien consulta)",
-      "buyerId": "uuid",
-      "buyerName": "string",
-      "sellerId": "uuid",
-      "sellerName": "string",
-      "counterpartyId": "uuid (la otra parte)",
-      "counterpartyName": "string",
-      "counterpartyAvatarUrl": "uri|null",
-      "myRating": "integer(1-5)|null (calificación que dejó quien consulta)",
-      "canReview": "boolean (true si quien consulta todavía no calificó y no venció reviewDeadline)",
-      "reviewDeadline": "date-time (completedAt + 7 días)"
-    },
-    "ReviewItem": {
-      "id": "uuid",
-      "rating": "integer(1-5)",
-      "comment": "string|null",
-      "createdAt": "date-time",
-      "reviewerName": "string",
-      "operationType": "buy|sell (rol del usuario calificado en la operación: sell = lo calificaron como vendedor)"
-    }
-  },
-  "endpoints": [
+  "routes": [
     {
-      "group": "system",
+      "method": "POST",
+      "path": "/uploads/images"
+    },
+    {
       "method": "GET",
-      "path": "/",
-      "auth": "none",
-      "summary": "Información básica del servicio.",
-      "response": { "name": "string", "version": "string", "health": "/health", "documentation": "/docs" }
+      "path": "/uploads/:filename"
     },
     {
-      "group": "system",
+      "method": "POST",
+      "path": "/auth/otp/request"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/otp/resend"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/otp/check"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/otp/verify"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/login/password"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/logout"
+    },
+    {
       "method": "GET",
-      "path": "/health",
-      "auth": "none",
-      "summary": "Chequeo de salud.",
-      "response": { "status": "ok", "timestamp": "date-time" }
+      "path": "/me"
     },
     {
-      "group": "system",
-      "method": "GET",
-      "path": "/docs",
-      "auth": "none",
-      "summary": "Índice de rutas agrupado por área funcional.",
-      "response": { "<area>": ["METHOD /path"] }
-    },
-
-    {
-      "group": "authentication",
-      "method": "POST",
-      "path": "/auth/otp/request",
-      "auth": "none",
-      "summary": "Emite un código OTP de 6 dígitos (fuera de producción se loguea por consola).",
-      "body": { "email": "string(email)", "purpose": "otpPurpose" },
-      "response": { "message": "string", "expiresAt": "date-time" },
-      "errors": ["EMAIL_ALREADY_REGISTERED (registration)", "USER_NOT_FOUND (login/set_password)", "OTP_RATE_LIMIT", "VALIDATION_ERROR"]
-    },
-    {
-      "group": "authentication",
-      "method": "POST",
-      "path": "/auth/otp/resend",
-      "auth": "none",
-      "summary": "Reenvía un OTP (invalida el anterior). Misma lógica que /auth/otp/request.",
-      "body": { "email": "string(email)", "purpose": "otpPurpose" },
-      "response": { "message": "string", "expiresAt": "date-time" },
-      "errors": ["EMAIL_ALREADY_REGISTERED", "USER_NOT_FOUND", "OTP_RATE_LIMIT", "VALIDATION_ERROR"]
-    },
-    {
-      "group": "authentication",
-      "method": "POST",
-      "path": "/auth/otp/verify",
-      "auth": "none",
-      "summary": "Verifica el OTP y crea la sesión. Según `purpose`: registra la cuenta, inicia sesión, o agrega una contraseña a una cuenta existente.",
-      "body": {
-        "email": "string(email)",
-        "code": "string(6 dígitos)",
-        "purpose": "otpPurpose",
-        "name?": "string(2-80)",
-        "username?": "string(3-30, [a-zA-Z0-9_.-])",
-        "password?": "string(8-72) (obligatoria si purpose=set_password)",
-        "phone?": "string(6-30)",
-        "zone?": "string(2-100)"
-      },
-      "response": { "userId": "uuid", "session": { "$ref": "Session" } },
-      "errors": ["OTP_EXPIRED", "OTP_LOCKED", "OTP_INVALID", "EMAIL_ALREADY_REGISTERED", "USERNAME_TAKEN", "USER_NOT_FOUND", "PASSWORD_REQUIRED", "VALIDATION_ERROR"]
-    },
-    {
-      "group": "authentication",
-      "method": "POST",
-      "path": "/auth/login/password",
-      "auth": "none",
-      "summary": "Login con email o username y contraseña.",
-      "body": { "email": "string(min 3; email o username)", "password": "string(8-72)" },
-      "response": { "userId": "uuid", "session": { "$ref": "Session" } },
-      "errors": ["INVALID_CREDENTIALS", "VALIDATION_ERROR"]
-    },
-    {
-      "group": "authentication",
-      "method": "POST",
-      "path": "/auth/logout",
-      "auth": "required",
-      "summary": "Cierra la sesión actual.",
-      "response": { "message": "Sesión cerrada" }
-    },
-
-    {
-      "group": "profiles",
-      "method": "GET",
-      "path": "/me",
-      "auth": "required",
-      "summary": "Perfil propio con reputación.",
-      "response": { "...Profile": "Profile", "hasPassword": "boolean", "reputation": { "$ref": "PublicUser" } }
-    },
-    {
-      "group": "profiles",
       "method": "PATCH",
-      "path": "/me",
-      "auth": "required",
-      "summary": "Edita datos personales. En phone, zone y avatarUrl, null borra el valor y omitirlo lo conserva. avatarUrl sale de POST /uploads/images.",
-      "body": {
-        "name?": "string(2-80)",
-        "email?": "string(email)",
-        "phone?": "string(6-30)|null",
-        "zone?": "string(2-100)|null",
-        "avatarUrl?": "uri|null"
-      },
-      "response": { "$ref": "Profile" },
-      "errors": ["EMAIL_ALREADY_REGISTERED", "VALIDATION_ERROR"]
+      "path": "/me"
     },
     {
-      "group": "profiles",
       "method": "GET",
-      "path": "/users/:id",
-      "auth": "none",
-      "summary": "Perfil público: reputación, antigüedad y publicaciones activas.",
-      "response": { "...PublicUser": "PublicUser", "activePublications": [{ "$ref": "PublicationSummary" }] },
-      "errors": ["USER_NOT_FOUND"]
+      "path": "/usuarios/:id"
     },
     {
-      "group": "profiles",
       "method": "GET",
-      "path": "/users/:id/reviews",
-      "auth": "none",
-      "summary": "NUEVO. Calificaciones recibidas por el usuario, más recientes primero. Sólo reseñas donde el usuario es el calificado.",
-      "query": { "page?": "integer (default 1)", "pageSize?": "integer (default 20, máx 50)" },
-      "response": { "items": [{ "$ref": "ReviewItem" }], "pagination": { "$ref": "Pagination" } },
-      "errors": ["USER_NOT_FOUND"]
+      "path": "/users/:id"
     },
-
     {
-      "group": "publications",
       "method": "GET",
-      "path": "/categories",
-      "auth": "none",
-      "summary": "Categorías disponibles.",
-      "response": { "items": ["category"] }
+      "path": "/usuarios/:id/valoraciones"
     },
     {
-      "group": "publications",
       "method": "GET",
-      "path": "/zones",
-      "auth": "none",
-      "summary": "Zonas de vendedores con publicaciones activas (para el filtro del feed).",
-      "response": { "items": ["string"] }
+      "path": "/users/:id/reviews"
     },
     {
-      "group": "publications",
-      "method": "GET",
-      "path": "/publications",
-      "auth": "optional",
-      "summary": "Feed paginado de publicaciones activas con búsqueda y filtros combinables. Sin sesión devuelve acciones deshabilitadas; con sesión personaliza favorito y acciones según el usuario.",
-      "query": {
-        "page?": "integer",
-        "pageSize?": "integer",
-        "q?": "string(max 200) (título o descripción)",
-        "category?": "category",
-        "condition?": "condition",
-        "zone?": "string (coincidencia exacta, sin distinguir mayúsculas)",
-        "minPrice?": "number",
-        "maxPrice?": "number",
-        "sort?": "sort (default recent)"
-      },
-      "response": {
-        "items": [
-          {
-            "id": "uuid",
-            "title": "string",
-            "description": "string",
-            "category": "category",
-            "price": "number",
-            "itemCondition": "condition",
-            "zone": "string|null",
-            "publishedAt": "date-time",
-            "sellerId": "uuid",
-            "sellerName": "string",
-            "coverImage": "uri|null",
-            "isFavorite": "boolean (true si la publicación está guardada por el usuario autenticado)",
-            "actions": {
-              "canAsk": "boolean",
-              "canOffer": "boolean",
-              "canFavorite": "boolean (false para usuarios anónimos y para el dueño)",
-              "canManage": "boolean (true sólo para el dueño)"
-            }
-          }
-        ],
-        "pagination": { "$ref": "Pagination" }
-      },
-      "errors": ["INVALID_PRICE_RANGE", "VALIDATION_ERROR"]
-    },
-    {
-      "group": "publications",
-      "method": "GET",
-      "path": "/publications/:id",
-      "auth": "optional",
-      "summary": "Detalle. Las publicaciones pausadas siguen siendo visibles, pero no permiten acciones de comprador. La dirección exacta sólo se revela al vendedor y al comprador de la operación creada al aceptar una oferta.",
-      "response": {
-        "id": "uuid",
-        "sellerId": "uuid",
-        "title": "string",
-        "description": "string",
-        "category": "category",
-        "itemCondition": "condition",
-        "status": "publicationStatus",
-        "publishedAt": "date-time",
-        "createdAt": "date-time",
-        "updatedAt": "date-time",
-        "zone": "string|null",
-        "price": "number",
-        "images": [{ "$ref": "Image" }],
-        "seller": { "$ref": "PublicUser" },
-        "questions": [
-          {
-            "id": "uuid",
-            "text": "string",
-            "answer": "string|null",
-            "createdAt": "date-time",
-            "answeredAt": "date-time|null",
-            "askerId": "uuid",
-            "askerName": "string"
-          }
-        ],
-        "isFavorite": "boolean",
-        "address": "string|null",
-        "addressLocked": "boolean",
-        "actions": { "canAsk": "boolean", "canOffer": "boolean", "canFavorite": "boolean", "canManage": "boolean" }
-      },
-      "errors": ["PUBLICATION_NOT_FOUND"]
-    },
-    {
-      "group": "publications",
       "method": "POST",
-      "path": "/publications",
-      "auth": "required",
-      "summary": "Crea una publicación completa; queda activa. La zona se toma del perfil.",
-      "body": {
-        "title": "string(3-120)",
-        "description": "string(10-5000)",
-        "category": "category",
-        "price": "number(0.01-999999999)",
-        "condition": "condition",
-        "address": "string(3-200)",
-        "imageUrls": "uri[] (1-10)"
-      },
-      "response": { "$ref": "PublicationRow" },
-      "errors": ["VALIDATION_ERROR"]
+      "path": "/publicaciones/:id/reclamos"
     },
     {
-      "group": "publications",
-      "method": "PATCH",
-      "path": "/publications/:id",
-      "auth": "required",
-      "summary": "Edita una publicación propia no vendida. Un cambio de precio marca novedad en los favoritos.",
-      "body": {
-        "title?": "string(3-120)",
-        "description?": "string(10-5000)",
-        "category?": "category",
-        "price?": "number",
-        "condition?": "condition",
-        "address?": "string(3-200)",
-        "imageUrls?": "uri[] (1-10)"
-      },
-      "response": { "$ref": "PublicationRow" },
-      "errors": ["PUBLICATION_NOT_FOUND", "NOT_OWNER", "PUBLICATION_SOLD", "VALIDATION_ERROR"]
-    },
-    {
-      "group": "publications",
-      "method": "PATCH",
-      "path": "/publications/:id/status",
-      "auth": "required",
-      "summary": "Pausa o reactiva una publicación propia.",
-      "body": { "status": "active|paused" },
-      "response": { "id": "uuid", "status": "active|paused" },
-      "errors": ["PUBLICATION_NOT_FOUND", "NOT_OWNER", "INVALID_STATUS_TRANSITION"]
-    },
-    {
-      "group": "publications",
       "method": "GET",
-      "path": "/me/publications",
-      "auth": "required",
-      "summary": "Mis publicaciones, filtrables por estado.",
-      "query": { "status?": "publicationStatus" },
-      "response": { "items": [{ "$ref": "PublicationRow" }] }
+      "path": "/publicaciones/:id/reclamos"
     },
     {
-      "group": "publications",
-      "method": "POST",
-      "path": "/uploads/images",
-      "auth": "required",
-      "summary": "Sube una imagen (jpg, png o webp, máx 20 MB). Devuelve la URL para usar en imageUrls o avatarUrl.",
-      "contentType": "multipart/form-data",
-      "body": { "file": "binary (image/*)" },
-      "response": { "url": "uri" },
-      "errors": ["INVALID_IMAGE", "VALIDATION_ERROR"]
-    },
-    {
-      "group": "publications",
       "method": "GET",
-      "path": "/uploads/:filename",
-      "auth": "none",
-      "summary": "Devuelve el archivo de imagen subido.",
-      "response": "binary (image)",
-      "errors": ["IMAGE_NOT_FOUND"]
+      "path": "/me/reclamos"
     },
-
     {
-      "group": "favorites",
+      "method": "GET",
+      "path": "/reclamos/:id"
+    },
+    {
       "method": "POST",
-      "path": "/publications/:id/favorite",
-      "auth": "required",
-      "summary": "Marca una publicación como favorita (idempotente) y guarda el precio actual.",
-      "response": { "publicationId": "uuid", "isFavorite": true },
-      "errors": ["PUBLICATION_NOT_FOUND", "OWN_PUBLICATION"]
+      "path": "/reclamos/:id/aceptar"
     },
     {
-      "group": "favorites",
+      "method": "POST",
+      "path": "/reclamos/:id/rechazar"
+    },
+    {
+      "method": "POST",
+      "path": "/reclamos/:id/cancelar"
+    },
+    {
+      "method": "POST",
+      "path": "/publicaciones/:id/resolver"
+    },
+    {
+      "method": "POST",
+      "path": "/publicaciones/:id/valoraciones"
+    },
+    {
+      "method": "GET",
+      "path": "/reclamos/:id/mensajes"
+    },
+    {
+      "method": "POST",
+      "path": "/reclamos/:id/mensajes"
+    },
+    {
+      "method": "GET",
+      "path": "/me/busquedas"
+    },
+    {
+      "method": "POST",
+      "path": "/me/busquedas"
+    },
+    {
       "method": "DELETE",
-      "path": "/publications/:id/favorite",
-      "auth": "required",
-      "summary": "Quita el favorito.",
-      "response": { "publicationId": "uuid", "isFavorite": false }
+      "path": "/me/busquedas"
     },
     {
-      "group": "favorites",
       "method": "GET",
-      "path": "/me/favorites",
-      "auth": "required",
-      "summary": "Mis favoritos, con indicador de novedad si cambió el precio.",
-      "response": {
-        "items": [
-          {
-            "id": "uuid",
-            "title": "string",
-            "price": "number",
-            "itemCondition": "condition",
-            "zone": "string|null",
-            "status": "publicationStatus",
-            "hasUpdate": "boolean",
-            "favoritedAt": "date-time",
-            "priceChanged": "0|1",
-            "coverImage": "uri|null"
-          }
-        ],
-        "unreadCount": "integer"
-      }
+      "path": "/alertas"
     },
     {
-      "group": "favorites",
       "method": "POST",
-      "path": "/me/favorites/read",
-      "auth": "required",
-      "summary": "Marca como vistas las novedades de todos los favoritos.",
-      "response": { "unreadCount": 0 }
-    },
-
-    {
-      "group": "savedSearches",
-      "method": "POST",
-      "path": "/saved-searches",
-      "auth": "required",
-      "summary": "Guarda una búsqueda con sus filtros.",
-      "body": {
-        "name": "string(2-80)",
-        "query?": "string(max 200)",
-        "category?": "category",
-        "minPrice?": "number",
-        "maxPrice?": "number",
-        "condition?": "condition",
-        "zone?": "string(2-100)",
-        "sort?": "sort"
-      },
-      "response": { "$ref": "SavedSearch" },
-      "errors": ["VALIDATION_ERROR"]
+      "path": "/alertas"
     },
     {
-      "group": "savedSearches",
-      "method": "GET",
-      "path": "/saved-searches",
-      "auth": "required",
-      "summary": "Mis búsquedas guardadas con su contador de novedades.",
-      "response": { "items": [{ "$ref": "SavedSearch" }], "unreadCount": "integer" }
+      "method": "PATCH",
+      "path": "/alertas/:id"
     },
     {
-      "group": "savedSearches",
-      "method": "POST",
-      "path": "/saved-searches/:id/read",
-      "auth": "required",
-      "summary": "Pone en cero las novedades de una búsqueda.",
-      "response": { "id": "uuid", "unreadCount": 0 },
-      "errors": ["SAVED_SEARCH_NOT_FOUND"]
-    },
-    {
-      "group": "savedSearches",
       "method": "DELETE",
-      "path": "/saved-searches/:id",
-      "auth": "required",
-      "summary": "Elimina una búsqueda guardada.",
-      "response": { "message": "Búsqueda eliminada" },
-      "errors": ["SAVED_SEARCH_NOT_FOUND"]
+      "path": "/alertas/:id"
     },
-
     {
-      "group": "questions",
       "method": "POST",
-      "path": "/publications/:id/questions",
-      "auth": "required",
-      "summary": "Pregunta sobre una publicación activa ajena.",
-      "body": { "text": "string(2-1000)" },
-      "response": { "id": "uuid", "publicationId": "uuid", "text": "string", "createdAt": "date-time" },
-      "errors": ["PUBLICATION_NOT_FOUND", "PUBLICATION_NOT_ACTIVE", "OWN_PUBLICATION"]
+      "path": "/alertas/:id/leida"
     },
     {
-      "group": "questions",
-      "method": "POST",
-      "path": "/questions/:id/answer",
-      "auth": "required",
-      "summary": "El vendedor responde una pregunta.",
-      "body": { "answer": "string(2-1000)" },
-      "response": { "id": "uuid", "answer": "string", "answeredAt": "date-time" },
-      "errors": ["QUESTION_NOT_FOUND", "NOT_OWNER"]
-    },
-
-    {
-      "group": "offers",
-      "method": "POST",
-      "path": "/publications/:id/offers",
-      "auth": "required",
-      "summary": "Ofrece un precio por una publicación activa ajena. La oferta vence a los OFFER_TTL_DAYS (default 3). Deja una novedad (hasUpdate) al vendedor.",
-      "body": { "amount": "number(0.01-999999999)", "message?": "string(max 500)" },
-      "response": {
-        "id": "uuid",
-        "publicationId": "uuid",
-        "amount": "number",
-        "message": "string|null",
-        "status": "pending",
-        "expiresAt": "date-time",
-        "createdAt": "date-time"
-      },
-      "errors": ["PUBLICATION_NOT_FOUND", "PUBLICATION_NOT_ACTIVE", "OWN_PUBLICATION", "VALIDATION_ERROR"]
-    },
-    {
-      "group": "offers",
-      "method": "POST",
-      "path": "/offers/:id/respond",
-      "auth": "required",
-      "summary": "El vendedor acepta, rechaza o contraoferta una oferta pendiente. Deja una novedad al comprador. Aceptar es atómico: en una sola transacción crea la operación, marca la publicación como sold, rechaza el resto de las ofertas pendientes/contraofertadas de esa publicación (con novedad para sus compradores) y desbloquea la dirección sólo para comprador y vendedor. Si algún paso falla no se persiste nada.",
-      "body": { "action": "accept|reject|counter", "counterAmount?": "number (obligatorio si action=counter)" },
-      "response": {
-        "accept": { "id": "uuid", "status": "accepted", "operationId": "uuid" },
-        "reject": { "id": "uuid", "status": "rejected" },
-        "counter": { "id": "uuid", "status": "countered", "counterAmount": "number" }
-      },
-      "errors": ["OFFER_NOT_FOUND", "NOT_OWNER", "OFFER_EXPIRED", "OFFER_ALREADY_RESOLVED", "PUBLICATION_NOT_ACTIVE", "COUNTER_AMOUNT_REQUIRED", "VALIDATION_ERROR"]
-    },
-    {
-      "group": "offers",
-      "method": "POST",
-      "path": "/offers/:id/respond-to-counter",
-      "auth": "required",
-      "summary": "El comprador acepta (misma transacción atómica, al precio de la contraoferta) o rechaza la contraoferta. Deja una novedad al vendedor.",
-      "body": { "action": "accept|reject" },
-      "response": {
-        "accept": { "id": "uuid", "status": "accepted", "operationId": "uuid" },
-        "reject": { "id": "uuid", "status": "rejected" }
-      },
-      "errors": ["OFFER_NOT_FOUND", "NOT_OWNER", "OFFER_EXPIRED", "OFFER_ALREADY_RESOLVED", "PUBLICATION_NOT_ACTIVE", "VALIDATION_ERROR"]
-    },
-    {
-      "group": "offers",
-      "method": "POST",
-      "path": "/offers/:id/cancel",
-      "auth": "required",
-      "summary": "El comprador retira su oferta mientras esté pendiente. Deja una novedad al vendedor. Cambio: una oferta ajena o inexistente devuelve OFFER_NOT_FOUND (antes PENDING_OFFER_NOT_FOUND) y una vencida o ya resuelta devuelve OFFER_EXPIRED / OFFER_ALREADY_RESOLVED.",
-      "response": { "id": "uuid", "status": "cancelled" },
-      "errors": ["OFFER_NOT_FOUND", "OFFER_EXPIRED", "OFFER_ALREADY_RESOLVED"]
-    },
-    {
-      "group": "offers",
       "method": "GET",
-      "path": "/offers/:id",
-      "auth": "required",
-      "summary": "NUEVO. Detalle de una oferta propia (enviada o recibida), con la misma forma que los items de GET /me/offers. Vence las ofertas caducadas antes de responder. No marca como leída.",
-      "response": { "$ref": "Offer" },
-      "errors": ["OFFER_NOT_FOUND"]
+      "path": "/notificaciones"
     },
     {
-      "group": "offers",
-      "method": "GET",
-      "path": "/me/offers",
-      "auth": "required",
-      "summary": "Mis ofertas, enviadas y recibidas, más recientes primero. CAMBIO: cada item suma coverImage, otherPartyId/Name/AvatarUrl y hasUpdate; la respuesta suma unreadCount.",
-      "response": { "items": [{ "$ref": "Offer" }], "unreadCount": "integer (cantidad de items con hasUpdate=true)" }
-    },
-    {
-      "group": "offers",
       "method": "POST",
-      "path": "/me/offers/read",
-      "auth": "required",
-      "summary": "NUEVO. Marca como leídas las novedades de todas mis ofertas (enviadas y recibidas). Las novedades del otro participante no se tocan.",
-      "response": { "unreadCount": 0 }
-    },
-
-    {
-      "group": "operations",
-      "method": "GET",
-      "path": "/me/operations",
-      "auth": "required",
-      "summary": "Historial de compras y ventas concretadas, más recientes primero. CAMBIO: cada item suma counterpartyId/Name/AvatarUrl, canReview y reviewDeadline.",
-      "query": {
-        "type?": "buy|sell",
-        "from?": "date-time (completedAt >=)",
-        "to?": "date-time (completedAt <=)"
-      },
-      "response": { "items": [{ "$ref": "Operation" }] },
-      "errors": ["VALIDATION_ERROR"]
+      "path": "/notificaciones/:id/leida"
     },
     {
-      "group": "operations",
-      "method": "GET",
-      "path": "/operations/:id",
-      "auth": "required",
-      "summary": "NUEVO. Detalle de una operación propia, con la misma forma que los items de GET /me/operations.",
-      "response": { "$ref": "Operation" },
-      "errors": ["OPERATION_NOT_FOUND"]
-    },
-    {
-      "group": "operations",
       "method": "POST",
-      "path": "/operations/:id/reviews",
-      "auth": "required",
-      "summary": "Califica a la contraparte de una operación. El servidor rechaza calificaciones ajenas, repetidas o pasados 7 días desde completedAt (ver canReview / reviewDeadline en la operación). Cambio: el código de reseña repetida es REVIEW_ALREADY_EXISTS (antes ALREADY_REVIEWED).",
-      "body": { "rating": "integer(1-5)", "comment?": "string(max 1000)" },
-      "response": {
-        "id": "uuid",
-        "operationId": "uuid",
-        "reviewedUserId": "uuid",
-        "rating": "integer",
-        "comment": "string|null"
-      },
-      "errors": ["OPERATION_NOT_FOUND", "NOT_PARTICIPANT", "REVIEW_ALREADY_EXISTS", "REVIEW_WINDOW_EXPIRED", "VALIDATION_ERROR"]
+      "path": "/notificaciones/leidas"
+    },
+    {
+      "method": "GET",
+      "path": "/categorias"
+    },
+    {
+      "method": "GET",
+      "path": "/categories"
+    },
+    {
+      "method": "GET",
+      "path": "/barrios"
+    },
+    {
+      "method": "GET",
+      "path": "/zones"
+    },
+    {
+      "method": "GET",
+      "path": "/publicaciones"
+    },
+    {
+      "method": "GET",
+      "path": "/publicaciones/:id"
+    },
+    {
+      "method": "GET",
+      "path": "/mis-publicaciones"
+    },
+    {
+      "method": "POST",
+      "path": "/publicaciones"
+    },
+    {
+      "method": "PATCH",
+      "path": "/publicaciones/:id"
+    },
+    {
+      "method": "DELETE",
+      "path": "/publicaciones/:id"
+    },
+    {
+      "method": "POST",
+      "path": "/publicaciones/:id/seguir"
+    },
+    {
+      "method": "DELETE",
+      "path": "/publicaciones/:id/seguir"
+    },
+    {
+      "method": "GET",
+      "path": "/me/seguidas"
     }
   ]
 }

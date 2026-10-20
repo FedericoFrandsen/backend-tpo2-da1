@@ -1,178 +1,157 @@
-# Marketplace API con Elysia
+# Hallado API
 
-Backend para una app Android de compraventa. Incluye autenticación por OTP y contraseña, perfiles y reputación, publicaciones con borradores, imágenes, favoritos, búsquedas guardadas, preguntas, ofertas, operaciones y calificaciones. La persistencia usa Drizzle ORM sobre SQLite nativo de Bun.
+Backend para la app Hallado de objetos y mascotas perdidas. Adaptado del código base del TP1 de Francisco Messina y del grupo, con Bun, TypeScript, Elysia, Drizzle y SQLite. No necesita instalar un servidor de base de datos.
 
-## Requisitos y ejecución
+## Requisitos y arranque
 
-- [Bun](https://bun.sh/) 1.2 o posterior.
-- No requiere una base externa: Drizzle usa el driver `bun:sqlite`.
+Bun 1.4.2 o superior. Abrí una terminal en esta carpeta:
 
-```bash
-bun install
-cp .env.example .env
+```powershell
+bun install --frozen-lockfile
+```
+
+Si es la primera instalación, creá el archivo de configuración:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Si ya tenés `.env`, conservalo; las variables nuevas tienen valores predeterminados. `OFFER_TTL_DAYS` del TP1 ya no se usa y puede borrarse.
+
+```powershell
+bun run db:seed
 bun run dev
 ```
 
-En Windows PowerShell, el segundo comando se puede reemplazar por `Copy-Item .env.example .env`.
+Las migraciones se aplican automáticamente. `db:seed` es opcional, idempotente y no cambia las contraseñas ni los datos existentes. Solo inserta registros de demostración que todavía no existen.
 
-La API queda disponible en `http://localhost:3000`. `GET /health` verifica el estado y `GET /docs` devuelve un índice de rutas. Para probar:
+- Salud: http://localhost:3000/health
+- Rutas: http://localhost:3000/docs
+- Android Emulator: http://10.0.2.2:3000
+- Celular físico: usá la IPv4 de tu PC, misma red Wi-Fi y acceso al puerto 3000 en el firewall.
 
-```bash
+El servidor escucha en `0.0.0.0`. En Expo el frontend todavía usa mocks: reemplazar el backend no conecta automáticamente las pantallas. El contrato para reemplazar los mocks está en `docs/INTEGRACION.md`.
+
+## Reemplazar el backend que ya tenés
+
+1. Detené el servidor con Ctrl+C.
+2. Extraé este ZIP en una carpeta temporal; no trabajes dentro del archivo comprimido.
+3. En PowerShell, dentro de la carpeta extraída, ejecutá el actualizador con la ruta de tu repositorio:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Actualizar-Hallado.ps1 -Destino "C:\Users\Fede\Downloads\backend-tpo2-da1-main"
+```
+
+El script valida que el destino tenga el backend del TP1/TP2, guarda una copia de los archivos que va a reemplazar en una carpeta hermana y actualiza el código. No ejecuta Git, no publica cambios y no copia `.git`, `.env`, `data`, `uploads` ni `node_modules`. Conserva tus migraciones y agrega las nuevas. La política `Bypass` aplica únicamente a ese proceso.
+
+4. Volvé a la carpeta de tu repositorio y ejecutá:
+
+```powershell
+bun install --frozen-lockfile
 bun run typecheck
 bun test
-```
-
-## Base de datos con Drizzle
-
-El esquema tipado está en `src/db/schema.ts`, la conexión y ejecución automática de migraciones en `src/database.ts`, y las migraciones versionadas en `drizzle/`. No hay consultas SQL directas en las rutas.
-
-Después de modificar el esquema:
-
-```bash
-bun run db:generate
-bun run db:migrate
-```
-
-> Si tu `data/marketplace.sqlite` es de antes de que se sacara el estado `draft` (commit que quitó
-> el borrador server-side), la migración que endurece `publications` a `NOT NULL` va a fallar
-> contra filas viejas incompletas. Como ese archivo es local y no se versiona, lo más simple es
-> borrarlo y volver a correr `db:migrate` + `db:seed`.
-
-Para inspeccionar los datos visualmente:
-
-```bash
-bun run db:studio
-```
-
-Para cargar datos de prueba (el comando es idempotente y no borra datos existentes):
-
-```bash
 bun run db:seed
+bun run dev
 ```
 
-El seed crea 4 usuarios con 5 publicaciones cada uno, además de favoritos, búsquedas, preguntas,
-ofertas, una operación y reseñas. Los usuarios son `ana@example.com`, `bruno@example.com`,
-`carla@example.com` y `diego@example.com`; todos pueden iniciar sesión con la contraseña `password123`.
+También podés copiar manualmente el contenido del ZIP sobre el repositorio y aceptar el reemplazo de archivos. En ese caso, reemplazá completas las carpetas `src` y `tests` para evitar que queden archivos viejos; conservá `.git`, `.env`, `data`, `uploads` y las migraciones previas. El ZIP no contiene dependencias, bases de datos, credenciales ni historial de Git.
 
-Al iniciar la API también se aplican automáticamente las migraciones pendientes, incluyendo en los tests con una base SQLite en memoria.
+## Usuarios de demostración
 
-## Estructura
+Se crean al ejecutar `bun run db:seed`, exclusivamente fuera de producción:
 
+| Email | Contraseña para cuentas nuevas |
+| --- | --- |
+| demo@hallado.com | Hallado123 |
+| lucia@hallado.com | Hallado123 |
+| martin@hallado.com | Hallado123 |
+
+Hay 216 publicaciones abiertas (las seis categorías y barrios), devoluciones concretadas, reputación, insignia y un reclamo pendiente. El seed usa fechas relativas al día en que se ejecuta. Si volvés a ejecutarlo otro día, las publicaciones ya existentes conservan sus fechas; creá nuevas publicaciones para probar alertas nuevas.
+
+Si una cuenta demo ya existía, se conserva su contraseña anterior. Las fotos de los ejemplos están vacías para que puedas probar la subida real desde la app.
+
+## Funcionalidades
+
+- Registro con OTP: solicitud, comprobación sin crear cuenta y finalización con contraseña.
+- Login por email/contraseña, sesiones Bearer y logout.
+- Recupero con OTP, reenvío, expiración, cinco intentos y revocación de sesiones anteriores.
+- Contraseñas con letras y números, entre 8 y 72 caracteres; hash Argon2 de Bun. Los tokens se guardan como SHA-256.
+- Perfil editable: nombre, foto, barrio, teléfono y consentimiento para compartirlo.
+- Perfil público sin email, teléfono ni historial de publicaciones.
+- Reputación calculada por devoluciones concretadas y valoraciones; insignia Vecino solidario al alcanzar cinco devoluciones.
+- Búsqueda del tipo opuesto, categoría, palabras sin distinción de tildes/mayúsculas, barrio, períodos/rango, coordenadas y radio.
+- Resultados paginados y ordenados por fecha o cercanía; hasta cinco búsquedas recientes por usuario.
+- Publicaciones perdidas/encontradas: creación, edición, eliminación lógica, fotos y gestión de estados.
+- Reclamos: crear, aceptar, rechazar, cancelar y resolver una devolución; un único aceptado por publicación.
+- Dirección exacta reservada al autor y al reclamante aceptado. Coordenadas públicas redondeadas a tres decimales; distancia redondeada a 0.1 km.
+- Teléfono visible a la contraparte únicamente con reclamo aceptado y consentimiento vigente.
+- Mensajes privados entre las partes de un reclamo aceptado, que pueden seguir consultándose tras resolverlo.
+- Valoración positiva/negativa de la contraparte, una por persona y devolución concretada.
+- Seguir publicaciones y recibir sus novedades.
+- Alertas de búsqueda, coincidencias y notificaciones persistentes con estado de lectura.
+- Subida autenticada de imágenes JPEG/PNG/WebP, hasta 5 MB por archivo y hasta cinco fotos por publicación.
+
+La biometría, los permisos GPS, la selección de fotos y el almacenamiento seguro del token corresponden a Expo/dispositivo. El backend no solicita ni guarda datos biométricos.
+
+## OTP por consola o email real
+
+La configuración inicial permite probar sin contratar ni configurar servicios. Con `EMAIL_MODE=console`, el código aparece en la terminal que ejecuta el servidor:
+
+```text
+[OTP] registration persona@ejemplo.com: 482915
 ```
-src/
-  index.ts       arranque del servidor
-  app.ts         creación de la app, CORS, manejo de errores e índice de rutas
-  config.ts      configuración leída del entorno (falla al arrancar si es inválida)
-  database.ts    conexión SQLite y ejecución de migraciones
-  auth.ts        sesiones: hash de token, requireUser / optionalUser
-  queries.ts     consultas compartidas entre rutas (perfil público, imágenes)
-  types.ts       constantes del dominio y schemas de validación reutilizables
-  utils.ts       helpers sin dependencias (fechas, precios, paginación)
-  db/schema.ts   esquema Drizzle
-  routes/        auth, users, publications, interactions
+
+Los códigos son aleatorios: **123456 no es un código fijo**. No se devuelven por HTTP. Vencen según `OTP_TTL_MINUTES` (10 por defecto), permiten cinco errores y requieren 30 segundos entre solicitudes. Al reenviar se invalida el anterior. `/auth/otp/check` no consume el código; `/auth/otp/verify` lo consume al completar la operación y vuelve a comprobarlo.
+
+Para enviar emails reales, configurá una cuenta y un remitente habilitado en Resend y completá `.env`:
+
+```dotenv
+EMAIL_MODE=resend
+RESEND_API_KEY=tu_clave
+EMAIL_FROM=Hallado <tu-remitente@tu-dominio.com>
 ```
 
-Las rutas reciben la instancia de base por parámetro (`authRoutes(db)`), así los tests pueden
-inyectar una base en memoria sin tocar el disco.
+Reiniciá el servidor. Se implementó el adaptador de Resend; las pruebas simulan respuestas del proveedor, no se enviaron emails reales ni se usaron credenciales tuyas. Documentación del proveedor: https://resend.com/docs/api-reference/emails/send-email
 
-## Autenticación
+En producción se exige un proveedor real; la API no arranca con OTP por consola. Las alertas y mensajes se consultan por HTTP: no hay push de Expo ni SMS. Para probar varios roles, usá cuentas diferentes.
 
-1. Enviar `{ "email": "...", "purpose": "registration" }` a `POST /auth/otp/request`.
-2. En desarrollo, la respuesta incluye `devCode`. En producción hay que conectar el envío de email en `src/routes/auth.ts`; el código nunca se devuelve si `NODE_ENV=production`.
-3. Confirmar con `POST /auth/otp/verify`. En registro también acepta `name`, `username`, `password`, `phone` y `zone`.
-4. Enviar el token resultante en las rutas privadas: `Authorization: Bearer <token>`.
+## Persistencia y migraciones
 
-Para entrar con OTP se usa `purpose: "login"`. También existe `POST /auth/login/password` con `{ "login": "email-o-usuario", "password": "..." }`. Los OTP vencen, se invalidan al reenviar, tienen espera de 30 segundos y se bloquean tras cinco intentos fallidos.
+- `data/hallado.sqlite`: cuentas, sesiones y datos de Hallado.
+- `uploads/`: imágenes subidas.
+- `drizzle/`: migraciones versionadas.
 
-## Rutas principales
+La migración nueva es aditiva: conserva las tablas del TP1 y agrega las de Hallado bajo el prefijo `hallado_`; los usuarios reciben `share_phone=false` por defecto. Los datos de compraventa no se transforman en pérdidas/hallazgos ni se sirven por la nueva API. `src/db/legacy.ts` conserva el esquema previo únicamente para compatibilidad y generación de migraciones; no hay rutas de ofertas ni de precios en esta versión.
 
-| Área | Método y ruta | Uso |
-|---|---|---|
-| Auth | `POST /auth/otp/request`, `/auth/otp/resend`, `/auth/otp/verify` | Registro y acceso por código |
-| Auth | `POST /auth/login/password`, `POST /auth/logout` | Login tradicional y cierre de sesión |
-| Perfil | `GET /me`, `PATCH /me` | Perfil privado (incluye `avatarUrl`; GET informa `hasPassword`) |
-| Perfil | `GET /users/:id` | Reputación, antigüedad y publicaciones activas |
-| Perfil | `GET /users/:id/reviews` | Comentarios y calificaciones recibidas, paginados |
-| Home | `GET /publications` | Paginación, texto, categoría, precio, condición, zona y orden |
-| Home | `GET /categories` | Categorías disponibles |
-| Home | `GET /zones` | Zonas únicas de vendedores con publicaciones activas |
-| Detalle | `GET /publications/:id` | Galería, vendedor, preguntas y acciones disponibles; dirección oculta hasta que se acepta una oferta |
-| Publicación | `POST /publications` | Crear una publicación completa; la zona se hereda del perfil |
-| Publicación | `PATCH /publications/:id` | Editar una publicación propia (incluida la dirección) |
-| Publicación | `PATCH /publications/:id/status` | Pausar o reactivar |
-| Publicación | `GET /me/publications` | Listar publicaciones propias por estado |
-| Imágenes | `POST /uploads/images`, `GET /uploads/:filename` | Subir y servir JPG, PNG o WebP de hasta 5 MB (fotos de publicación o de perfil) |
-| Favoritos | `POST/DELETE /publications/:id/favorite` | Agregar o quitar |
-| Favoritos | `GET /me/favorites`, `POST /me/favorites/read` | Listado e indicador por cambios de precio |
-| Búsquedas | `POST/GET /saved-searches` | Guardar filtros y ver novedades |
-| Búsquedas | `POST /saved-searches/:id/read`, `DELETE /saved-searches/:id` | Marcar como leída o eliminar |
-| Preguntas | `POST /publications/:id/questions`, `POST /questions/:id/answer` | Consulta y respuesta |
-| Ofertas | `POST /publications/:id/offers`, `POST /offers/:id/respond` | Ofertar (con mensaje opcional) y aceptar/rechazar/contraofertar |
-| Ofertas | `POST /offers/:id/respond-to-counter` | El comprador acepta o rechaza la contraoferta del vendedor |
-| Ofertas | `POST /offers/:id/cancel`, `GET /me/offers` | Cancelar una oferta propia y listar las propias (vencen solas pasado su plazo); cada item trae portada, contraparte y `hasUpdate` |
-| Ofertas | `GET /offers/:id` | Detalle de una oferta propia (misma forma que un item de `GET /me/offers`) |
-| Ofertas | `POST /me/offers/read` | Marcar como leídas las novedades de las ofertas |
-| Operaciones | `GET /me/operations`, `GET /operations/:id` | Historial filtrable por tipo y fecha, y detalle; incluyen contraparte, `canReview` y `reviewDeadline` |
-| Operaciones | `POST /operations/:id/reviews` | Calificar a la contraparte (ventana de 7 días, una vez por parte) |
+Se probó actualizar una base del TP1 y reabrir una base de Hallado en disco. Conservá tu base y tus imágenes juntas si necesitás mover datos a otra computadora. No borres las migraciones anteriores.
 
-`GET /docs` devuelve este mismo índice en JSON. El contrato completo (cuerpos, respuestas y errores de cada endpoint) está en [`api-endpoints.json`](api-endpoints.json).
+## Comandos
 
-### Parámetros del home
+```powershell
+bun run typecheck
+bun test
+bun run check
+bun run db:migrate
+bun run db:generate
+bun run db:studio
+bun run db:seed
+bun run start
+```
 
-`GET /publications` acepta `page`, `pageSize`, `q`, `category`, `minPrice`, `maxPrice`, `condition`, `zone` y `sort`. Los órdenes son `recent`, `price_asc` y `price_desc`. El filtro de zona compara contra la zona actual del perfil del vendedor.
+`db:generate` solo se usa si modificás el esquema. No hace falta ejecutarlo para instalar este ZIP. El lockfile fija las dependencias probadas.
 
-Las condiciones son `new`, `like_new` y `used`. Las categorías se consultan con `GET /categories`
-y las opciones vigentes del filtro de zona con `GET /zones`.
+## Prueba rápida de login en PowerShell
 
-## Alta guiada e imágenes
+Con el seed cargado y el servidor abierto:
 
-El paso a paso de la carga (fotos, título, descripción, categoría, precio, condición, zona y
-dirección) vive enteramente en la app Android: el borrador en progreso se guarda localmente en el
-dispositivo, así que si la persona sale de la app lo encuentra conservado al volver. El backend no
-tiene noción de borrador ni de pasos: recién recibe la publicación cuando está completa, vía
-`POST /publications`, y esta queda `active` de inmediato.
+```powershell
+$login = Invoke-RestMethod -Method Post -Uri "http://localhost:3000/auth/login/password" -ContentType "application/json" -Body '{"email":"demo@hallado.com","password":"Hallado123"}'
+$halladoHeaders = @{ Authorization = "Bearer $($login.session.token)" }
+Invoke-RestMethod -Uri "http://localhost:3000/me" -Headers $halladoHeaders
+```
 
-Android sube cada foto como `multipart/form-data` a `POST /uploads/images` (campo `file`) y guarda
-las URLs devueltas para mandarlas en `imageUrls` al crear o editar la publicación.
+La colección `docs/Hallado.postman_collection.json` se puede importar en Postman o en un cliente compatible. Contiene rutas, cuerpos de ejemplo y variables; captura el token al iniciar sesión. `api-endpoints.json` y `/docs` muestran el índice de rutas.
 
-`POST /publications` exige título, descripción, categoría, precio, condición, dirección y al menos
-una imagen; si falta algo, la validación del body lo rechaza con 422 antes de tocar la base. La zona
-no se recibe ni se guarda en la publicación: siempre se obtiene de la zona actual del vendedor.
+## Validación de la entrega
 
-## Novedades y reputación
-
-- Si cambia el precio de una publicación favorita, `GET /me/favorites` devuelve `hasUpdate` y `priceChanged`.
-- Al publicar un artículo nuevo se incrementa `unreadCount` de cada búsqueda guardada compatible.
-- Aceptar una oferta (directa o tras una contraoferta) es atómico: en una sola transacción crea la operación, marca el artículo como vendido y rechaza las demás ofertas pendientes. Si la publicación ya no está activa o la oferta ya se resolvió, no se persiste nada.
-- Las ofertas tienen novedades por participante: una oferta nueva, una contraoferta, una respuesta, una cancelación o un vencimiento dejan `hasUpdate` en la otra parte. `GET /me/offers` devuelve `unreadCount` y `POST /me/offers/read` lo pone en cero.
-- Comprador y vendedor pueden calificar una vez por operación, dentro de los 7 días de concretada. El servidor gobierna esa regla: cada operación informa `canReview` y `reviewDeadline`, y `POST /operations/:id/reviews` rechaza las calificaciones ajenas, repetidas o vencidas. El perfil público calcula promedio, cantidad de calificaciones, compras y ventas concretadas, y `GET /users/:id/reviews` lista los comentarios recibidos.
-
-## Ofertas, dirección y mapa
-
-- Una oferta tiene un plazo de vigencia (`OFFER_TTL_DAYS`) y pasa a `expired` automáticamente al vencer; esto se aplica de forma perezosa cada vez que se lee o se actúa sobre una oferta (`expireStaleOffers` en `src/queries.ts`), además de en un barrido al arrancar la app.
-- El vendedor puede `accept`, `reject` o `counter` (con `counterAmount`) una oferta pendiente; si contraoferta, el comprador la resuelve en `POST /offers/:id/respond-to-counter`.
-- La dirección exacta de una publicación (`address`) solo se devuelve en `GET /publications/:id` al vendedor o al comprador cuya oferta ya fue aceptada; el resto ve `addressLocked: true` y `address: null`.
-
-## Errores
-
-Todo error responde `{ "error": { "code": "...", "message": "..." } }`; el cliente debe decidir por `code`. Para ofertas y calificaciones los códigos estables son `OFFER_EXPIRED`, `OFFER_ALREADY_RESOLVED`, `PUBLICATION_NOT_ACTIVE`, `REVIEW_WINDOW_EXPIRED` y `REVIEW_ALREADY_EXISTS`. El catálogo completo está en `api-endpoints.json`.
-
-## Biometría y modo sin conexión (consignas 1 y 6)
-
-Ambos flujos son responsabilidad del cliente Android y no requieren endpoints propios:
-
-- El desbloqueo por biometría protege localmente el token de sesión ya emitido (`BiometricPrompt` + Android Keystore); el backend sigue validando ese mismo token con `Authorization: Bearer`.
-- El modo sin conexión cachea en el dispositivo (por ejemplo con Room) las respuestas de `GET /publications` y `GET /publications/:id` ya recibidas, y deshabilita las acciones que requieren red mientras no haya conectividad.
-
-## Configuración
-
-| Variable | Default | Descripción |
-|---|---:|---|
-| `PORT` | `3000` | Puerto HTTP |
-| `DATABASE_PATH` | `data/marketplace.sqlite` | Archivo SQLite |
-| `OTP_TTL_MINUTES` | `10` | Vigencia del código |
-| `SESSION_DAYS` | `30` | Duración de la sesión |
-| `OFFER_TTL_DAYS` | `3` | Plazo de vigencia de una oferta antes de vencer |
-| `NODE_ENV` | `development` | En `production` oculta el OTP |
-
-Para producción conviene reemplazar el almacenamiento local de imágenes por S3/Cloudinary, conectar un proveedor de correo, restringir CORS al dominio de la app/API y servir todo detrás de HTTPS.
+Las pruebas usan SQLite en memoria y carpetas temporales. Incluyen registro por etapas, contraseña requerida, OTP, concurrencia, recupero, logout, permisos, búsqueda, persistencia, reclamos, privacidad, mensajes, devoluciones, reputación, insignias, seguidores, alertas, imágenes y migración desde TP1. La aplicación frontend y un dispositivo Android se verifican al conectar los hooks: este ZIP no cambia la app móvil.
