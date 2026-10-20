@@ -1,100 +1,199 @@
-import { and, asc, avg, count, eq, inArray, lte, or } from "drizzle-orm";
-import type { AppDatabase } from "./database";
-import { offers, operations, publicationImages, reviews, users } from "./db/schema";
-import { nowIso } from "./utils";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
+import type { Store } from "./database";
+import { alerts, claims, follows, halladoPublications as posts, halladoReviews, notifications, searchHistory, uploads, users } from "./db/schema";
+import { ApiError } from "./errors";
+import { config } from "./config";
+import { CATEGORIES, ZONES, type PublicationBody, type SearchFilters } from "./types";
+import { cleanText, distanceKm, localDate, normalizeText, nowIso, requireDate } from "./utils";
 
-export function listImages(db: AppDatabase, publicationId: string) {
-  return db
-    .select({ id: publicationImages.id, url: publicationImages.url, position: publicationImages.position })
-    .from(publicationImages)
-    .where(eq(publicationImages.publicationId, publicationId))
-    .orderBy(asc(publicationImages.position))
-    .all();
+export type Post = typeof posts.$inferSelect;
+export type Claim = typeof claims.$inferSelect;
+
+export function getPost(db: Store, id: string) {
+  const post = db.select().from(posts).where(and(eq(posts.id, id), isNull(posts.deletedAt))).get();
+  if (!post) throw new ApiError(404, "PUBLICATION_NOT_FOUND", "No encontramos la publicación");
+  return post;
 }
-
-/**
- * Portada (imagen de menor `position`) de varias publicaciones en una sola consulta,
- * para evitar un SELECT por fila al armar listados.
- */
-export function getCoverImages(db: AppDatabase, publicationIds: string[]): Map<string, string> {
-  const covers = new Map<string, string>();
-  if (publicationIds.length === 0) return covers;
-  const rows = db
-    .select({ publicationId: publicationImages.publicationId, url: publicationImages.url })
-    .from(publicationImages)
-    .where(inArray(publicationImages.publicationId, publicationIds))
-    .orderBy(asc(publicationImages.publicationId), asc(publicationImages.position))
-    .all();
-  for (const row of rows) if (!covers.has(row.publicationId)) covers.set(row.publicationId, row.url);
-  return covers;
+export function ownerPost(db: Store, id: string, userId: string) {
+  const post = getPost(db, id);
+  if (post.userId !== userId) throw new ApiError(403, "FORBIDDEN", "La publicación pertenece a otra persona");
+  return post;
 }
-
-/** Reemplaza la galería completa de una publicación, renumerando las posiciones desde 0. */
-export function replaceImages(db: AppDatabase, publicationId: string, imageUrls: string[]) {
-  db.transaction((tx) => {
-    tx.delete(publicationImages).where(eq(publicationImages.publicationId, publicationId)).run();
-    if (imageUrls.length === 0) return;
-    tx.insert(publicationImages)
-      .values(imageUrls.map((url, position) => ({ id: crypto.randomUUID(), publicationId, url, position })))
-      .run();
-  });
+export function getClaim(db: Store, id: string) {
+  const claim = db.select().from(claims).where(eq(claims.id, id)).get();
+  if (!claim) throw new ApiError(404, "CLAIM_NOT_FOUND", "No encontramos el reclamo");
+  return claim;
 }
-
-/**
- * Consigna 2 (Perfil y Reputación): perfil público con reputación (promedio de estrellas,
- * cantidad de operaciones como comprador y como vendedor) y antigüedad en la plataforma.
- */
-export function getPublicUser(db: AppDatabase, userId: string) {
-  const user = db
-    .select({ id: users.id, name: users.name, zone: users.zone, avatarUrl: users.avatarUrl, memberSince: users.createdAt })
-    .from(users)
-    .where(eq(users.id, userId))
-    .get();
-  if (!user) return null;
-
-  const rating = db
-    .select({ average: avg(reviews.rating), total: count(reviews.id) })
-    .from(reviews)
-    .where(eq(reviews.reviewedUserId, userId))
-    .get();
-  const purchases = db.select({ total: count() }).from(operations).where(eq(operations.buyerId, userId)).get();
-  const sales = db.select({ total: count() }).from(operations).where(eq(operations.sellerId, userId)).get();
-
+export function acceptedClaim(db: Store, postId: string) {
+  return db.select().from(claims).where(and(eq(claims.publicationId, postId), eq(claims.estado, "aceptado"))).get();
+}
+export function publicProfile(db: Store, userId: string) {
+  const u = db.select().from(users).where(eq(users.id, userId)).get();
+  if (!u) throw new ApiError(404, "USER_NOT_FOUND", "No encontramos el usuario");
+  const completedReturns = db.select({ id: posts.id }).from(posts)
+    .leftJoin(claims, and(eq(claims.publicationId, posts.id), eq(claims.estado, "aceptado")))
+    .where(and(eq(posts.estado, "resuelta"), or(eq(posts.userId, userId), eq(claims.userId, userId)))).all().length;
+  const received = db.select({ positiva: halladoReviews.positiva }).from(halladoReviews)
+    .where(eq(halladoReviews.reviewedUserId, userId)).all();
+  const reputation = {
+    completedReturns,
+    positiveReviews: received.filter((v) => v.positiva).length,
+    negativeReviews: received.filter((v) => !v.positiva).length,
+  };
+  const badges = completedReturns >= 5
+    ? [{ id: "vecino-solidario", name: "Vecino solidario", description: "Por concretar 5 devoluciones." }]
+    : [];
+  return { id: u.id, name: u.name, zone: u.zone, avatarUrl: u.avatarUrl, memberSince: u.createdAt, reputation, badges };
+}
+export function privateProfile(db: Store, userId: string) {
+  const u = db.select().from(users).where(eq(users.id, userId)).get()!;
+  return { ...publicProfile(db, userId), email: u.email, username: u.username, phone: u.phone, sharePhone: u.sharePhone, hasPassword: !!u.passwordHash };
+}
+export function serializePost(db: Store, p: Post, viewerId?: string, detail = false) {
+  const accepted = acceptedClaim(db, p.id);
+  const own = viewerId === p.userId;
+  const participant = own || (!!accepted && accepted.userId === viewerId);
+  const privileged = own || (!!accepted && participant);
+  const publisher = publicProfile(db, p.userId);
+  const source = db.select({ phone: users.phone, sharePhone: users.sharePhone }).from(users).where(eq(users.id, p.userId)).get()!;
+  const mine = viewerId ? db.select().from(claims)
+    .where(and(eq(claims.publicationId, p.id), eq(claims.userId, viewerId))).get() : null;
+  const siguiendo = !!viewerId && !!db.select().from(follows)
+    .where(and(eq(follows.publicationId, p.id), eq(follows.userId, viewerId))).get();
+  const latitud = privileged && detail ? p.latitud : Math.round(p.latitud * 1000) / 1000;
+  const longitud = privileged && detail ? p.longitud : Math.round(p.longitud * 1000) / 1000;
   return {
-    ...user,
-    ratingAverage: rating?.average == null ? 0 : Math.round(Number(rating.average) * 100) / 100,
-    ratingCount: rating?.total ?? 0,
-    purchasesCompleted: purchases?.total ?? 0,
-    salesCompleted: sales?.total ?? 0,
+    id: p.id, tipo: p.tipo, titulo: p.titulo, descripcion: p.descripcion,
+    categoria: p.categoria, barrio: p.barrio, fecha: p.fecha, franja: p.franja,
+    estado: p.estado, latitud, longitud, ubicacion: { latitud, longitud }, fotos: p.fotos,
+    creadaEn: p.createdAt, actualizadaEn: p.updatedAt, resueltaEn: p.resolvedAt,
+    ...(detail ? {
+      direccionExacta: privileged ? p.direccionExacta : null,
+      publicador: { ...publisher, ...(participant && accepted && source.sharePhone ? { phone: source.phone } : {}) },
+      esPropia: own, siguiendo, reclamoEnviado: !!mine && ["pendiente", "aceptado"].includes(mine.estado),
+      reclamoAceptado: !!accepted && participant,
+      miReclamo: mine ? { id: mine.id, estado: mine.estado, mensaje: mine.mensaje } : null,
+      valoracion: viewerId ? db.select({ id: halladoReviews.id, positiva: halladoReviews.positiva, comentario: halladoReviews.comentario })
+        .from(halladoReviews).where(and(eq(halladoReviews.publicationId, p.id), eq(halladoReviews.reviewerId, viewerId))).get() ?? null : null,
+    } : {}),
   };
 }
-
-/**
- * Consigna 7 (Ofertas y Negociación): "cada oferta tiene ... un plazo de vigencia, pasado el
- * cual caduca automáticamente". Se aplica de forma perezosa (al leer/actuar sobre ofertas) en
- * vez de con un cron, porque alcanza para el alcance de esta API.
- */
-export function expireStaleOffers(db: AppDatabase) {
-  db.update(offers)
-    .set({ status: "expired", buyerHasUpdate: true, sellerHasUpdate: true, updatedAt: nowIso() })
-    .where(and(or(eq(offers.status, "pending"), eq(offers.status, "countered")), lte(offers.expiresAt, nowIso())))
-    .run();
+export function serializeClaim(db: Store, claim: Claim, post: Post, viewerId: string) {
+  const u = db.select().from(users).where(eq(users.id, claim.userId)).get()!;
+  return {
+    id: claim.id, publicacionId: claim.publicationId, usuarioId: u.id, usuario: u.name,
+    perfil: publicProfile(db, u.id), mensaje: claim.mensaje, estado: claim.estado,
+    permiteTelefono: u.sharePhone,
+    telefono: claim.estado === "aceptado" && u.sharePhone && (viewerId === post.userId || viewerId === u.id) ? u.phone : null,
+    creadaEn: claim.createdAt, actualizadaEn: claim.updatedAt,
+  };
 }
-
-/** Consigna 9: plazo para calificar una operación, contado desde que se concretó. */
-export const REVIEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-
-export const reviewDeadline = (completedAt: string) => new Date(new Date(completedAt).getTime() + REVIEW_WINDOW_MS).toISOString();
-
-/**
- * Consigna 4/8: la dirección exacta de una publicación solo se revela al vendedor y al
- * comprador cuya oferta fue aceptada ("si la oferta es aceptada, recién se puede observar
- * la dirección de entrega").
- */
-export function hasAcceptedOffer(db: AppDatabase, publicationId: string, buyerId: string) {
-  return !!db
-    .select({ id: operations.id })
-    .from(operations)
-    .where(and(eq(operations.publicationId, publicationId), eq(operations.buyerId, buyerId)))
-    .get();
+export function normalizeFilters(input: SearchFilters): SearchFilters {
+  if (!["perdi", "encontre"].includes(input.situacion) || !CATEGORIES.includes(input.categoria)
+      || !["hoy", "tresDias", "semana", "rango"].includes(input.periodo)) {
+    throw new ApiError(422, "INVALID_FILTERS", "Revisá la situación, la categoría y el período");
+  }
+  const zona = (input.zona ?? "").trim();
+  const palabras = (input.palabras ?? "").trim();
+  if (zona.length > 100 || palabras.length > 200) throw new ApiError(422, "INVALID_FILTERS", "Los filtros son demasiado largos");
+  const u = input.ubicacion;
+  if (u && (!Number.isFinite(u.latitud) || !Number.isFinite(u.longitud) || Math.abs(u.latitud) > 90 || Math.abs(u.longitud) > 180)) {
+    throw new ApiError(422, "INVALID_LOCATION", "Las coordenadas no son válidas");
+  }
+  if (!zona && !u) throw new ApiError(422, "LOCATION_REQUIRED", "Elegí un barrio o usá tu ubicación actual");
+  if (input.periodo === "rango") {
+    requireDate(input.desde ?? ""); requireDate(input.hasta ?? "");
+    if (input.desde! > input.hasta!) throw new ApiError(422, "INVALID_DATE_RANGE", "El inicio debe ser anterior al final");
+  }
+  if (input.radioKm !== undefined && (!Number.isFinite(input.radioKm) || input.radioKm < 0.1 || input.radioKm > 500)) {
+    throw new ApiError(422, "INVALID_RADIUS", "El radio debe estar entre 0.1 y 500 km");
+  }
+  return {
+    situacion: input.situacion, categoria: input.categoria, palabras, zona, periodo: input.periodo,
+    ...(input.periodo === "rango" ? { desde: input.desde, hasta: input.hasta } : {}),
+    ubicacion: u ? { latitud: u.latitud, longitud: u.longitud } : null,
+    ...(u ? { radioKm: input.radioKm ?? config.searchRadiusKm } : {}),
+  };
+}
+export function filtersFromQuery(q: Record<string, string | undefined>) {
+  const withCoords = q.latitud !== undefined || q.longitud !== undefined;
+  return normalizeFilters({
+    situacion: q.situacion, categoria: q.categoria, palabras: q.palabras,
+    zona: q.zona, periodo: q.periodo ?? "semana", desde: q.desde, hasta: q.hasta,
+    ubicacion: withCoords ? { latitud: Number(q.latitud ?? NaN), longitud: Number(q.longitud ?? NaN) } : null,
+    radioKm: q.radioKm === undefined ? undefined : Number(q.radioKm),
+  } as SearchFilters);
+}
+export function dateRange(f: SearchFilters) {
+  if (f.periodo === "rango") return { desde: f.desde!, hasta: f.hasta! };
+  const hasta = localDate();
+  const d = new Date(`${hasta}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - (f.periodo === "semana" ? 6 : f.periodo === "tresDias" ? 2 : 0));
+  return { desde: d.toISOString().slice(0, 10), hasta };
+}
+export function searchOrigin(f: SearchFilters) {
+  return f.ubicacion ?? ZONES.find((z) => normalizeText(z.nombre) === normalizeText(f.zona ?? ""));
+}
+export function matchesPost(p: Post, f: SearchFilters) {
+  const range = dateRange(f);
+  const tipo = f.situacion === "perdi" ? "encontrado" : "perdido";
+  const words = normalizeText(f.palabras ?? "").split(/\s+/).filter(Boolean);
+  const text = normalizeText(`${p.titulo} ${p.descripcion}`);
+  return !p.deletedAt && p.estado === "abierta" && p.tipo === tipo && p.categoria === f.categoria
+    && (!f.zona || normalizeText(p.barrio) === normalizeText(f.zona))
+    && p.fecha >= range.desde && p.fecha <= range.hasta
+    && words.every((w) => text.includes(w))
+    && (!f.ubicacion || distanceKm(f.ubicacion, p) <= (f.radioKm ?? config.searchRadiusKm));
+}
+export function searchKey(f: SearchFilters) {
+  return JSON.stringify({ ...f, palabras: normalizeText(f.palabras ?? ""), zona: normalizeText(f.zona ?? "") });
+}
+export function rememberSearch(db: Store, userId: string, filtros: SearchFilters) {
+  const clave = searchKey(filtros);
+  db.insert(searchHistory).values({ id: crypto.randomUUID(), userId, filtros, clave, createdAt: nowIso() })
+    .onConflictDoUpdate({ target: [searchHistory.userId, searchHistory.clave], set: { filtros, createdAt: nowIso() } }).run();
+  const rows = db.select({ id: searchHistory.id }).from(searchHistory).where(eq(searchHistory.userId, userId))
+    .orderBy(desc(searchHistory.createdAt), desc(searchHistory.id)).all();
+  for (const row of rows.slice(5)) db.delete(searchHistory).where(eq(searchHistory.id, row.id)).run();
+}
+export function preparePublication(db: Store, userId: string, input: PublicationBody) {
+  const titulo = cleanText(input.titulo, 3, "título");
+  const descripcion = cleanText(input.descripcion, 10, "descripción");
+  requireDate(input.fecha);
+  const barrio = (input.barrio ?? "").trim();
+  const coord = input.ubicacion ?? ZONES.find((z) => normalizeText(z.nombre) === normalizeText(barrio));
+  if (!coord) throw new ApiError(422, "LOCATION_REQUIRED", "Elegí un barrio de la lista o enviá las coordenadas");
+  const fotos = input.fotos ?? [];
+  for (const url of fotos) {
+    if (!/^\/uploads\/[0-9a-f-]{36}\.(jpg|png|webp)$/.test(url)) {
+      throw new ApiError(422, "INVALID_IMAGE", "Primero subí las fotos a /uploads/images");
+    }
+    const image = db.select().from(uploads).where(eq(uploads.filename, url.slice("/uploads/".length))).get();
+    if (!image || image.userId !== userId) throw new ApiError(403, "IMAGE_NOT_OWNED", "La foto no pertenece a tu cuenta");
+  }
+  return {
+    tipo: input.tipo === "perdi" || input.tipo === "perdido" ? "perdido" as const : "encontrado" as const,
+    titulo, descripcion, categoria: input.categoria, barrio: barrio || "Ubicación actual",
+    fecha: input.fecha, franja: input.franja, latitud: coord.latitud, longitud: coord.longitud,
+    direccionExacta: input.direccionExacta?.trim() || null, fotos,
+  };
+}
+export function notify(db: Store, userId: string, tipo: string, mensaje: string,
+  data: { publicationId?: string; claimId?: string; alertId?: string; dedupeKey?: string } = {}) {
+  db.insert(notifications).values({ id: crypto.randomUUID(), userId, tipo, mensaje, ...data, createdAt: nowIso() })
+    .onConflictDoNothing().run();
+}
+export function notifyFollowers(db: Store, post: Post, mensaje: string) {
+  for (const f of db.select().from(follows).where(eq(follows.publicationId, post.id)).all()) {
+    if (f.userId !== post.userId) notify(db, f.userId, "publicacion", mensaje, { publicationId: post.id });
+  }
+}
+export function notifyMatches(db: Store, post: Post) {
+  for (const a of db.select().from(alerts).where(eq(alerts.activa, true)).all()) {
+    if (a.userId !== post.userId && matchesPost(post, a.filtros)) {
+      notify(db, a.userId, "coincidencia", `Hay una coincidencia: ${post.titulo}`, {
+        publicationId: post.id, alertId: a.id, dedupeKey: `alert:${a.id}:${post.id}`,
+      });
+    }
+  }
 }

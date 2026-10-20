@@ -1,156 +1,116 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { users } from "./legacy";
+import { CATEGORIES } from "../types";
+export * from "./legacy";
 
-// Consigna 2 (Perfil y Reputación): datos personales editables, incluida la foto de perfil.
-export const users = sqliteTable("users", {
+export const halladoPublications = sqliteTable("hallado_publications", {
   id: text("id").primaryKey(),
-  email: text("email").notNull().unique(),
-  username: text("username").unique(),
-  passwordHash: text("password_hash"),
-  name: text("name").notNull(),
-  phone: text("phone"),
-  zone: text("zone"),
-  avatarUrl: text("avatar_url"),
+  userId: text("user_id").notNull().references(() => users.id),
+  tipo: text("tipo", { enum: ["perdido", "encontrado"] }).notNull(),
+  titulo: text("titulo").notNull(),
+  descripcion: text("descripcion").notNull(),
+  categoria: text("categoria", { enum: CATEGORIES }).notNull(),
+  barrio: text("barrio").notNull(),
+  fecha: text("fecha").notNull(),
+  franja: text("franja", { enum: ["manana", "tarde", "noche"] }).notNull(),
+  latitud: real("latitud").notNull(),
+  longitud: real("longitud").notNull(),
+  direccionExacta: text("direccion_exacta"),
+  fotos: text("fotos", { mode: "json" }).$type<string[]>().notNull().default([]),
+  estado: text("estado", { enum: ["abierta", "en_reclamo", "resuelta"] }).notNull().default("abierta"),
   createdAt: text("created_at").notNull(),
-  emailVerifiedAt: text("email_verified_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  resolvedAt: text("resolved_at"),
+  deletedAt: text("deleted_at"),
+}, (t) => [
+  check("hallado_tipo_check", sql`${t.tipo} IN ('perdido','encontrado')`),
+  check("hallado_estado_check", sql`${t.estado} IN ('abierta','en_reclamo','resuelta')`),
+  check("hallado_franja_check", sql`${t.franja} IN ('manana','tarde','noche')`),
+  index("hallado_busqueda_idx").on(t.tipo, t.categoria, t.fecha),
+  index("hallado_propias_idx").on(t.userId, t.createdAt),
+]);
+
+export const claims = sqliteTable("hallado_claims", {
+  id: text("id").primaryKey(),
+  publicationId: text("publication_id").notNull().references(() => halladoPublications.id),
+  userId: text("user_id").notNull().references(() => users.id),
+  mensaje: text("mensaje").notNull(),
+  estado: text("estado", { enum: ["pendiente", "aceptado", "rechazado", "cancelado"] }).notNull().default("pendiente"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (t) => [
+  uniqueIndex("hallado_reclamo_usuario_unique").on(t.publicationId, t.userId),
+  uniqueIndex("hallado_aceptado_unique").on(t.publicationId).where(sql`${t.estado} = 'aceptado'`),
+  check("hallado_reclamo_estado_check", sql`${t.estado} IN ('pendiente','aceptado','rechazado','cancelado')`),
+]);
+
+export const follows = sqliteTable("hallado_follows", {
+  publicationId: text("publication_id").notNull().references(() => halladoPublications.id),
+  userId: text("user_id").notNull().references(() => users.id),
+  createdAt: text("created_at").notNull(),
+}, (t) => [primaryKey({ columns: [t.publicationId, t.userId] })]);
+
+export const halladoReviews = sqliteTable("hallado_reviews", {
+  id: text("id").primaryKey(),
+  publicationId: text("publication_id").notNull().references(() => halladoPublications.id),
+  reviewerId: text("reviewer_id").notNull().references(() => users.id),
+  reviewedUserId: text("reviewed_user_id").notNull().references(() => users.id),
+  positiva: integer("positiva", { mode: "boolean" }).notNull(),
+  comentario: text("comentario").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+}, (t) => [
+  uniqueIndex("hallado_valoracion_unique").on(t.publicationId, t.reviewerId),
+  index("hallado_valorado_idx").on(t.reviewedUserId),
+]);
+
+export const alerts = sqliteTable("hallado_alerts", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  clave: text("clave").notNull(),
+  filtros: text("filtros", { mode: "json" }).$type<import("../types").SearchFilters>().notNull(),
+  activa: integer("activa", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull(),
+}, (t) => [uniqueIndex("hallado_alerta_unique").on(t.userId, t.clave)]);
+
+export const searchHistory = sqliteTable("hallado_search_history", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  clave: text("clave").notNull(),
+  filtros: text("filtros", { mode: "json" }).$type<import("../types").SearchFilters>().notNull(),
+  createdAt: text("created_at").notNull(),
+}, (t) => [uniqueIndex("hallado_historial_unique").on(t.userId, t.clave)]);
+
+export const notifications = sqliteTable("hallado_notifications", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  tipo: text("tipo").notNull(),
+  mensaje: text("mensaje").notNull(),
+  publicationId: text("publication_id").references(() => halladoPublications.id),
+  claimId: text("claim_id").references(() => claims.id),
+  alertId: text("alert_id").references(() => alerts.id, { onDelete: "cascade" }),
+  dedupeKey: text("dedupe_key").unique(),
+  readAt: text("read_at"),
+  createdAt: text("created_at").notNull(),
+}, (t) => [index("hallado_notificacion_usuario_idx").on(t.userId, t.createdAt)]);
+
+export const messages = sqliteTable("hallado_messages", {
+  id: text("id").primaryKey(),
+  claimId: text("claim_id").notNull().references(() => claims.id),
+  senderId: text("sender_id").notNull().references(() => users.id),
+  texto: text("texto").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (t) => [index("hallado_mensaje_reclamo_idx").on(t.claimId, t.createdAt)]);
+
+export const uploads = sqliteTable("hallado_uploads", {
+  filename: text("filename").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  contentType: text("content_type").notNull(),
+  createdAt: text("created_at").notNull(),
 });
 
-export const otpCodes = sqliteTable("otp_codes", {
-  id: text("id").primaryKey(),
-  email: text("email").notNull(),
-  purpose: text("purpose", { enum: ["registration", "login", "set_password"] }).notNull(),
-  codeHash: text("code_hash").notNull(),
+export const loginAttempts = sqliteTable("hallado_login_attempts", {
+  login: text("login").primaryKey(),
   attempts: integer("attempts").notNull().default(0),
-  expiresAt: text("expires_at").notNull(),
-  consumedAt: text("consumed_at"),
-  createdAt: text("created_at").notNull(),
-}, (table) => [
-  check("otp_purpose_check", sql`${table.purpose} IN ('registration', 'login', 'set_password')`),
-  index("idx_otp_email_purpose").on(table.email, table.purpose, table.createdAt),
-]);
-
-export const sessions = sqliteTable("sessions", {
-  id: text("id").primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  tokenHash: text("token_hash").notNull().unique(),
-  expiresAt: text("expires_at").notNull(),
-  createdAt: text("created_at").notNull(),
-}, (table) => [index("idx_sessions_token").on(table.tokenHash)]);
-
-// Consigna 5 (Publicar un artículo): se guarda la dirección exacta. La zona no se duplica acá:
-// siempre se obtiene del perfil del vendedor.
-// Consigna 4/7 (Detalle / Ofertas): address solo se expone al vendedor y al comprador cuya
-// oferta fue aceptada (ver `canViewAddress` en routes/publications.ts).
-export const publications = sqliteTable("publications", {
-  id: text("id").primaryKey(),
-  sellerId: text("seller_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  // Ya no hay borrador server-side: una publicación siempre se crea completa, así que estos
-  // campos son obligatorios (a diferencia de cuando existía el estado "draft").
-  title: text("title").notNull(),
-  description: text("description").notNull(),
-  category: text("category").notNull(),
-  priceCents: integer("price_cents").notNull(),
-  itemCondition: text("item_condition", { enum: ["new", "like_new", "used"] }).notNull(),
-  address: text("address").notNull(),
-  // Sin estado "draft": el alta guiada vive en el cliente Android y solo llega al servidor
-  // cuando está completa, ya como "active" (ver POST /publications).
-  status: text("status", { enum: ["active", "paused", "sold"] }).notNull(),
-  publishedAt: text("published_at").notNull(),
-  createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull(),
-}, (table) => [
-  check("publication_condition_check", sql`${table.itemCondition} IN ('new', 'like_new', 'used')`),
-  check("publication_status_check", sql`${table.status} IN ('active', 'paused', 'sold')`),
-  index("idx_publications_feed").on(table.status, table.publishedAt),
-  index("idx_publications_seller").on(table.sellerId, table.status),
-]);
-
-export const publicationImages = sqliteTable("publication_images", {
-  id: text("id").primaryKey(),
-  publicationId: text("publication_id").notNull().references(() => publications.id, { onDelete: "cascade" }),
-  url: text("url").notNull(),
-  position: integer("position").notNull(),
-}, (table) => [uniqueIndex("publication_image_position_unique").on(table.publicationId, table.position)]);
-
-export const favorites = sqliteTable("favorites", {
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  publicationId: text("publication_id").notNull().references(() => publications.id, { onDelete: "cascade" }),
-  savedPriceCents: integer("saved_price_cents"),
-  hasUpdate: integer("has_update", { mode: "boolean" }).notNull().default(false),
-  createdAt: text("created_at").notNull(),
-}, (table) => [primaryKey({ columns: [table.userId, table.publicationId] })]);
-
-export const savedSearches = sqliteTable("saved_searches", {
-  id: text("id").primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  queryText: text("query_text"),
-  category: text("category"),
-  minPriceCents: integer("min_price_cents"),
-  maxPriceCents: integer("max_price_cents"),
-  itemCondition: text("item_condition", { enum: ["new", "like_new", "used"] }),
-  zone: text("zone"),
-  sort: text("sort", { enum: ["recent", "price_asc", "price_desc"] }).notNull().default("recent"),
-  unreadCount: integer("unread_count").notNull().default(0),
-  createdAt: text("created_at").notNull(),
-  lastCheckedAt: text("last_checked_at").notNull(),
+  windowStart: text("window_start").notNull(),
 });
-
-export const questions = sqliteTable("questions", {
-  id: text("id").primaryKey(),
-  publicationId: text("publication_id").notNull().references(() => publications.id, { onDelete: "cascade" }),
-  askerId: text("asker_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  text: text("text").notNull(),
-  answer: text("answer"),
-  createdAt: text("created_at").notNull(),
-  answeredAt: text("answered_at"),
-});
-
-// Consigna 7 (Ofertas y Negociación): precio propuesto + mensaje opcional, contraoferta del
-// vendedor (counterAmountCents) y vencimiento automático (expiresAt + status "expired").
-export const offers = sqliteTable("offers", {
-  id: text("id").primaryKey(),
-  publicationId: text("publication_id").notNull().references(() => publications.id, { onDelete: "cascade" }),
-  buyerId: text("buyer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  amountCents: integer("amount_cents").notNull(),
-  message: text("message"),
-  counterAmountCents: integer("counter_amount_cents"),
-  status: text("status", {
-    enum: ["pending", "countered", "accepted", "rejected", "expired", "cancelled"],
-  }).notNull(),
-  // Novedades sin leer por cada parte (nueva oferta, contraoferta, cambio de estado); se limpian con POST /me/offers/read.
-  buyerHasUpdate: integer("buyer_has_update", { mode: "boolean" }).notNull().default(false),
-  sellerHasUpdate: integer("seller_has_update", { mode: "boolean" }).notNull().default(false),
-  expiresAt: text("expires_at").notNull(),
-  createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull(),
-}, (table) => [
-  check(
-    "offer_status_check",
-    sql`${table.status} IN ('pending', 'countered', 'accepted', 'rejected', 'expired', 'cancelled')`,
-  ),
-]);
-
-export const operations = sqliteTable("operations", {
-  id: text("id").primaryKey(),
-  publicationId: text("publication_id").notNull().unique().references(() => publications.id),
-  offerId: text("offer_id").notNull().unique().references(() => offers.id),
-  buyerId: text("buyer_id").notNull().references(() => users.id),
-  sellerId: text("seller_id").notNull().references(() => users.id),
-  amountCents: integer("amount_cents").notNull(),
-  completedAt: text("completed_at").notNull(),
-});
-
-export const reviews = sqliteTable("reviews", {
-  id: text("id").primaryKey(),
-  operationId: text("operation_id").notNull().references(() => operations.id, { onDelete: "cascade" }),
-  reviewerId: text("reviewer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  reviewedUserId: text("reviewed_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  rating: integer("rating").notNull(),
-  comment: text("comment"),
-  createdAt: text("created_at").notNull(),
-}, (table) => [
-  check("review_rating_check", sql`${table.rating} BETWEEN 1 AND 5`),
-  uniqueIndex("review_operation_reviewer_unique").on(table.operationId, table.reviewerId),
-  index("idx_reviews_reviewed_user").on(table.reviewedUserId),
-]);

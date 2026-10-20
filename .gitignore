@@ -1,25 +1,12 @@
-# dependencias
-/node_modules
-
-# build / cobertura
-/build
-/dist
-/coverage
-
-# datos generados en runtime
-/data
-/uploads
-*.sqlite
-*.sqlite-shm
-*.sqlite-wal
-
-# variables de entorno (.env.example sí se versiona)
+node_modules/
+data/
+uploads/
 .env
-.env.local
-.env.*.local
-
-# misc
-.DS_Store
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
 *.log
-*.pem
 package-lock.json
+.DS_Store
+Thumbs.db

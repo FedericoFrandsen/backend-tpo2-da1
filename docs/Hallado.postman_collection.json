@@ -1,0 +1,851 @@
+{
+  "info": {
+    "name": "Hallado API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Backend Hallado. Primero cargar seed y ejecutar login. Para registro usar un email nuevo y copiar OTP. Para aceptar un reclamo hay que usar la sesión del autor de la publicación; el reclamante usa otra cuenta."
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "email",
+      "value": "demo@hallado.com",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "Hallado123",
+      "type": "string"
+    },
+    {
+      "key": "purpose",
+      "value": "registration",
+      "type": "string"
+    },
+    {
+      "key": "otp",
+      "value": "COPIAR_DESDE_CONSOLA_O_EMAIL",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "usuarioId",
+      "value": "demo-lucia",
+      "type": "string"
+    },
+    {
+      "key": "publicacionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "reclamoId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "alertaId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "notificacionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "filename",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "fotoUrl",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const d = new Date(); pm.variables.set(\"today\", d.getFullYear()+\"-\"+String(d.getMonth()+1).padStart(2,\"0\")+\"-\"+String(d.getDate()).padStart(2,\"0\"));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Fotos",
+      "item": [
+        {
+          "name": "POST /uploads/images",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/uploads/images",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": null,
+                  "description": "Seleccioná una foto JPEG, PNG o WebP menor a 5 MB."
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) { const r = pm.response.json(); pm.collectionVariables.set(\"filename\", r.filename); pm.collectionVariables.set(\"fotoUrl\", r.url); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /uploads/:filename",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/uploads/{{filename}}",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Autenticación",
+      "item": [
+        {
+          "name": "POST /auth/otp/request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/otp/request",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"purpose\": \"{{purpose}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /auth/otp/resend",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/otp/resend",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"purpose\": \"{{purpose}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /auth/otp/check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/otp/check",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"code\": \"{{otp}}\",\n  \"purpose\": \"{{purpose}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /auth/otp/verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/otp/verify",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"code\": \"{{otp}}\",\n  \"purpose\": \"{{purpose}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) { const r = pm.response.json(); pm.collectionVariables.set(\"token\", r.session.token); pm.collectionVariables.set(\"usuarioId\", r.userId); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/login/password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/login/password",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) { const r = pm.response.json(); pm.collectionVariables.set(\"token\", r.session.token); pm.collectionVariables.set(\"usuarioId\", r.userId); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/auth/logout",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Perfiles",
+      "item": [
+        {
+          "name": "GET /me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/me",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "PATCH /me",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/me",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Federico\",\n  \"zone\": \"Palermo\",\n  \"phone\": \"1155551234\",\n  \"sharePhone\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /usuarios/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/usuarios/{{usuarioId}}",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /users/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/{{usuarioId}}",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /usuarios/:id/valoraciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/usuarios/{{usuarioId}}/valoraciones",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /users/:id/reviews",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/{{usuarioId}}/reviews",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Publicaciones y reclamos",
+      "item": [
+        {
+          "name": "POST /publicaciones/:id/reclamos",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/publicaciones/{{publicacionId}}/reclamos",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mensaje\": \"Creo que son mis llaves, tienen una marca en el llavero.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) pm.collectionVariables.set(\"reclamoId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /publicaciones/:id/reclamos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/publicaciones/{{publicacionId}}/reclamos",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /me/reclamos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/me/reclamos",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /reclamos/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/reclamos/{{reclamoId}}",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "POST /reclamos/:id/aceptar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/reclamos/{{reclamoId}}/aceptar",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "POST /reclamos/:id/rechazar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/reclamos/{{reclamoId}}/rechazar",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "POST /reclamos/:id/cancelar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/reclamos/{{reclamoId}}/cancelar",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "POST /publicaciones/:id/resolver",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/publicaciones/{{publicacionId}}/resolver",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "POST /publicaciones/:id/valoraciones",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/publicaciones/{{publicacionId}}/valoraciones",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positiva\": true,\n  \"comentario\": \"Gracias por devolverlo.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /reclamos/:id/mensajes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/reclamos/{{reclamoId}}/mensajes",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "POST /reclamos/:id/mensajes",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/reclamos/{{reclamoId}}/mensajes",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texto\": \"Hola, ¿coordinamos la devolución?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /categorias",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/categorias",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/categories",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /barrios",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/barrios",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /zones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/zones",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /publicaciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/publicaciones?situacion=perdi&categoria=Llaves&zona=Palermo&periodo=semana&orden=recientes&page=1&pageSize=10",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /publicaciones/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/publicaciones/{{publicacionId}}",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /mis-publicaciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/mis-publicaciones",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "POST /publicaciones",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/publicaciones",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo\": \"encontre\",\n  \"titulo\": \"Llaves con llavero azul\",\n  \"descripcion\": \"Juego de tres llaves con un llavero azul.\",\n  \"categoria\": \"Llaves\",\n  \"barrio\": \"Palermo\",\n  \"fecha\": \"{{today}}\",\n  \"franja\": \"tarde\",\n  \"direccionExacta\": \"Dirección de prueba 123\",\n  \"fotos\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) pm.collectionVariables.set(\"publicacionId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /publicaciones/:id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/publicaciones/{{publicacionId}}",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"titulo\": \"Llaves con llavero azul (actualizado)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /publicaciones/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/publicaciones/{{publicacionId}}",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "POST /publicaciones/:id/seguir",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/publicaciones/{{publicacionId}}/seguir",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "DELETE /publicaciones/:id/seguir",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/publicaciones/{{publicacionId}}/seguir",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /me/seguidas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/me/seguidas",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alertas e historial",
+      "item": [
+        {
+          "name": "GET /me/busquedas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/me/busquedas",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "POST /me/busquedas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/me/busquedas",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"situacion\": \"perdi\",\n  \"categoria\": \"Llaves\",\n  \"zona\": \"Palermo\",\n  \"periodo\": \"semana\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /me/busquedas",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/me/busquedas",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /alertas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/alertas",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "POST /alertas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/alertas",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"filtros\": {\n    \"situacion\": \"perdi\",\n    \"categoria\": \"Llaves\",\n    \"zona\": \"Palermo\",\n    \"periodo\": \"semana\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 300) pm.collectionVariables.set(\"alertaId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /alertas/:id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/alertas/{{alertaId}}",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activa\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /alertas/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/alertas/{{alertaId}}",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "POST /alertas/:id/leida",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/alertas/{{alertaId}}/leida",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "GET /notificaciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/notificaciones",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "POST /notificaciones/:id/leida",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/notificaciones/{{notificacionId}}/leida",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        },
+        {
+          "name": "POST /notificaciones/leidas",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/notificaciones/leidas",
+            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección."
+          }
+        }
+      ]
+    }
+  ]
+}
