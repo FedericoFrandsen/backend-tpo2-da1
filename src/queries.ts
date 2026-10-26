@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, or } from "drizzle-orm";
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import type { Store } from "./database";
 import { alerts, claims, follows, halladoPublications as posts, halladoReviews, notifications, searchHistory, uploads, users } from "./db/schema";
 import { ApiError } from "./errors";
@@ -8,6 +8,25 @@ import { cleanText, distanceKm, localDate, normalizeText, nowIso, requireDate } 
 
 export type Post = typeof posts.$inferSelect;
 export type Claim = typeof claims.$inferSelect;
+
+export const CLAIM_EXPIRATION_HOURS = 48;
+export const CLAIM_EXPIRATION_MS = CLAIM_EXPIRATION_HOURS * 60 * 60 * 1000;
+
+export function isClaimExpired(claim: { estado: string; updatedAt?: string; createdAt?: string }): boolean {
+  if (claim.estado !== "pendiente") return false;
+  const fechaStr = claim.updatedAt || claim.createdAt;
+  if (!fechaStr) return false;
+  const fecha = new Date(fechaStr).getTime();
+  return Date.now() - fecha >= CLAIM_EXPIRATION_MS;
+}
+
+export function expirePendingClaims(db: Store): void {
+  const cutoff = new Date(Date.now() - CLAIM_EXPIRATION_MS).toISOString();
+  db.update(claims)
+    .set({ estado: "vencido" })
+    .where(and(eq(claims.estado, "pendiente"), sql`${claims.updatedAt} <= ${cutoff}`))
+    .run();
+}
 
 export function getPost(db: Store, id: string) {
   const post = db.select().from(posts).where(and(eq(posts.id, id), isNull(posts.deletedAt))).get();
@@ -20,6 +39,7 @@ export function ownerPost(db: Store, id: string, userId: string) {
   return post;
 }
 export function getClaim(db: Store, id: string) {
+  expirePendingClaims(db);
   const claim = db.select().from(claims).where(eq(claims.id, id)).get();
   if (!claim) throw new ApiError(404, "CLAIM_NOT_FOUND", "No encontramos el reclamo");
   return claim;
@@ -56,12 +76,15 @@ export function serializePost(db: Store, p: Post, viewerId?: string, detail = fa
   const privileged = own || (!!accepted && participant);
   const publisher = publicProfile(db, p.userId);
   const source = db.select({ phone: users.phone, sharePhone: users.sharePhone }).from(users).where(eq(users.id, p.userId)).get()!;
+  expirePendingClaims(db);
   const mine = viewerId ? db.select().from(claims)
     .where(and(eq(claims.publicationId, p.id), eq(claims.userId, viewerId))).get() : null;
   const siguiendo = !!viewerId && !!db.select().from(follows)
     .where(and(eq(follows.publicationId, p.id), eq(follows.userId, viewerId))).get();
   const latitud = privileged && detail ? p.latitud : Math.round(p.latitud * 1000) / 1000;
   const longitud = privileged && detail ? p.longitud : Math.round(p.longitud * 1000) / 1000;
+  const mineExpired = mine ? isClaimExpired(mine) : false;
+  const mineEstado = mine ? (mineExpired ? "vencido" : mine.estado) : null;
   return {
     id: p.id, tipo: p.tipo, titulo: p.titulo, descripcion: p.descripcion,
     categoria: p.categoria, barrio: p.barrio, fecha: p.fecha, franja: p.franja,
@@ -70,9 +93,16 @@ export function serializePost(db: Store, p: Post, viewerId?: string, detail = fa
     ...(detail ? {
       direccionExacta: privileged ? p.direccionExacta : null,
       publicador: { ...publisher, ...(participant && accepted && source.sharePhone ? { phone: source.phone } : {}) },
-      esPropia: own, siguiendo, reclamoEnviado: !!mine && ["pendiente", "aceptado"].includes(mine.estado),
+      esPropia: own, siguiendo,
+      reclamoEnviado: !!mine && ["pendiente", "aceptado"].includes(mine.estado) && !mineExpired,
       reclamoAceptado: !!accepted && participant,
-      miReclamo: mine ? { id: mine.id, estado: mine.estado, mensaje: mine.mensaje } : null,
+      miReclamo: mine ? {
+        id: mine.id,
+        estado: mineEstado,
+        mensaje: mine.mensaje,
+        intentos: mine.intentos ?? 1,
+        maxIntentos: 3,
+      } : null,
       valoracion: viewerId ? db.select({ id: halladoReviews.id, positiva: halladoReviews.positiva, comentario: halladoReviews.comentario })
         .from(halladoReviews).where(and(eq(halladoReviews.publicationId, p.id), eq(halladoReviews.reviewerId, viewerId))).get() ?? null : null,
     } : {}),
@@ -80,11 +110,14 @@ export function serializePost(db: Store, p: Post, viewerId?: string, detail = fa
 }
 export function serializeClaim(db: Store, claim: Claim, post: Post, viewerId: string) {
   const u = db.select().from(users).where(eq(users.id, claim.userId)).get()!;
+  const estado = isClaimExpired(claim) ? "vencido" : claim.estado;
   return {
     id: claim.id, publicacionId: claim.publicationId, usuarioId: u.id, usuario: u.name,
-    perfil: publicProfile(db, u.id), mensaje: claim.mensaje, estado: claim.estado,
+    perfil: publicProfile(db, u.id), mensaje: claim.mensaje, estado,
+    intentos: claim.intentos ?? 1,
+    maxIntentos: 3,
     permiteTelefono: u.sharePhone,
-    telefono: claim.estado === "aceptado" && u.sharePhone && (viewerId === post.userId || viewerId === u.id) ? u.phone : null,
+    telefono: estado === "aceptado" && u.sharePhone && (viewerId === post.userId || viewerId === u.id) ? u.phone : null,
     creadaEn: claim.createdAt, actualizadaEn: claim.updatedAt,
   };
 }

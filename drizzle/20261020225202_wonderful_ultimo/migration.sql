@@ -14,11 +14,12 @@ CREATE TABLE `hallado_claims` (
 	`user_id` text NOT NULL,
 	`mensaje` text NOT NULL,
 	`estado` text DEFAULT 'pendiente' NOT NULL,
+	`intentos` integer DEFAULT 1 NOT NULL,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
 	CONSTRAINT `fk_hallado_claims_publication_id_hallado_publications_id_fk` FOREIGN KEY (`publication_id`) REFERENCES `hallado_publications`(`id`),
 	CONSTRAINT `fk_hallado_claims_user_id_users_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`),
-	CONSTRAINT "hallado_reclamo_estado_check" CHECK("estado" IN ('pendiente','aceptado','rechazado','cancelado'))
+	CONSTRAINT "hallado_reclamo_estado_check" CHECK("estado" IN ('pendiente','aceptado','rechazado','cancelado','vencido'))
 );
 --> statement-breakpoint
 CREATE TABLE `hallado_follows` (

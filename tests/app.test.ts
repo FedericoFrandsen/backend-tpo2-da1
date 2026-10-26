@@ -383,4 +383,73 @@ describe("Hallado", () => {
       await expect(sendOtp({ email: "test@example.com", code: "123456", purpose: "registration" })).rejects.toMatchObject({ code: "EMAIL_DELIVERY_FAILED" });
     } finally { Object.assign(config, { emailMode: oldMode }); globalThis.fetch = originalFetch; }
   });
+  test("máximo de 3 intentos de reclamo por publicación", async () => {
+    const p = await publish();
+    // Intento 1
+    const c1 = await claim(p.id);
+    expect(c1.intentos).toBe(1);
+    await api(`/reclamos/${c1.id}/rechazar`, "POST", undefined, accounts[0]!.token);
+
+    // Intento 2
+    const c2 = await claim(p.id);
+    expect(c2.intentos).toBe(2);
+    await api(`/reclamos/${c2.id}/rechazar`, "POST", undefined, accounts[0]!.token);
+
+    // Intento 3
+    const c3 = await claim(p.id);
+    expect(c3.intentos).toBe(3);
+    await api(`/reclamos/${c3.id}/rechazar`, "POST", undefined, accounts[0]!.token);
+
+    // Intento 4: debe fallar por superar los 3 intentos
+    const c4Res = await api(`/publicaciones/${p.id}/reclamos`, "POST", { mensaje: "Intento cuatro prohibido" }, accounts[1]!.token);
+    expect(c4Res.response.status).toBe(409);
+    expect(c4Res.data.error.code).toBe("MAX_ATTEMPTS_EXCEEDED");
+  });
+  test("reclamo vence automáticamente a las 48 horas sin respuesta", async () => {
+    const p = await publish();
+    const c = await claim(p.id);
+    expect(c.estado).toBe("pendiente");
+
+    // Simulamos que pasaron 49 horas sin respuesta
+    const pasado49hs = new Date(Date.now() - 49 * 60 * 60 * 1000).toISOString();
+    db.update(claims).set({ createdAt: pasado49hs, updatedAt: pasado49hs }).where(eq(claims.id, c.id)).run();
+
+    // Al consultar la publicación, el reclamo figura como vencido
+    const postRes = await api(`/publicaciones/${p.id}`, "GET", undefined, accounts[1]!.token);
+    expect(postRes.data.miReclamo.estado).toBe("vencido");
+    expect(postRes.data.reclamoEnviado).toBe(false);
+
+    // El dueño intenta aceptar el reclamo vencido: debe fallar con 409
+    const aceptarRes = await api(`/reclamos/${c.id}/aceptar`, "POST", undefined, accounts[0]!.token);
+    expect(aceptarRes.response.status).toBe(409);
+    expect(aceptarRes.data.error.code).toBe("CLAIM_EXPIRED");
+
+    // El usuario puede enviar su intento 2
+    const intento2 = await claim(p.id);
+    expect(intento2.estado).toBe("pendiente");
+    expect(intento2.intentos).toBe(2);
+  });
+  test("sección mis reclamos: lista enviados y recibidos", async () => {
+    const p = await publish();
+    const c = await claim(p.id, 1);
+
+    // Reclamante consulta enviados
+    const enviados = await api("/me/reclamos?tipo=enviados", "GET", undefined, accounts[1]!.token);
+    expect(enviados.data.items).toHaveLength(1);
+    expect(enviados.data.items[0].id).toBe(c.id);
+    expect(enviados.data.items[0].esEnviado).toBe(true);
+
+    // Publicador consulta recibidos
+    const recibidos = await api("/me/reclamos?tipo=recibidos", "GET", undefined, accounts[0]!.token);
+    expect(recibidos.data.items).toHaveLength(1);
+    expect(recibidos.data.items[0].id).toBe(c.id);
+    expect(recibidos.data.items[0].esRecibido).toBe(true);
+
+    // Publicador acepta el reclamo
+    const aceptado = await api(`/reclamos/${c.id}/aceptar`, "POST", undefined, accounts[0]!.token);
+    expect(aceptado.response.status).toBe(200);
+
+    const actualizados = await api("/me/reclamos?tipo=recibidos", "GET", undefined, accounts[0]!.token);
+    expect(actualizados.data.items[0].estado).toBe("aceptado");
+  });
 });
