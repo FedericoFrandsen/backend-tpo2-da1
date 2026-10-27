@@ -453,3 +453,132 @@ describe("Hallado", () => {
     expect(actualizados.data.items[0].estado).toBe("aceptado");
   });
 });
+
+describe("Punto de encuentro", () => {
+  async function propose(id: string, user: number, direccion = "Av. Santa Fe 1234, CABA") {
+    const actual = (await api(`/reclamos/${id}/encuentro`, "GET", undefined, accounts[user]!.token)).data;
+    return api(`/reclamos/${id}/encuentro`, "POST", {
+      direccion, propuestaId: actual.encuentro?.id ?? null, intento: actual.intento,
+    }, accounts[user]!.token);
+  }
+
+  for (const tipo of ["encontre", "perdi"]) {
+    test(`${tipo}: propone quien tiene el objeto y acuerdan una alternativa`, async () => {
+      const p = await publish({ tipo }); const c = await accept(p.id);
+      const holder = tipo === "encontre" ? 0 : 1; const other = 1 - holder;
+      expect((await propose(c.id, other)).response.status).toBe(409);
+      const first = await propose(c.id, holder);
+      expect(first.response.status).toBe(200);
+      expect(first.data.puedeResponder).toBe(false);
+      const body = { propuestaId: first.data.encuentro.id, intento: 1 };
+      expect((await api(`/reclamos/${c.id}/encuentro/aceptar`, "POST", body, accounts[holder]!.token)).response.status).toBe(409);
+      const second = await propose(c.id, other, "Lima 775, CABA");
+      expect(second.response.status).toBe(200);
+      expect(second.data.encuentro.id).not.toBe(first.data.encuentro.id);
+      expect((await api(`/reclamos/${c.id}/encuentro/aceptar`, "POST", body, accounts[other]!.token)).response.status).toBe(409);
+      const accepted = await api(`/reclamos/${c.id}/encuentro/aceptar`, "POST", {
+        propuestaId: second.data.encuentro.id, intento: 1,
+      }, accounts[holder]!.token);
+      expect(accepted.response.status).toBe(200);
+      expect(accepted.data.encuentro.estado).toBe("aceptado");
+      const read = await api(`/reclamos/${c.id}/encuentro`, "GET", undefined, accounts[other]!.token);
+      expect(read.data.encuentro.direccion).toBe("Lima 775, CABA");
+      expect(read.data.encuentro.estado).toBe("aceptado");
+      expect((await propose(c.id, holder)).response.status).toBe(409);
+    });
+  }
+
+  test("el encuentro es privado y requiere un reclamo aceptado", async () => {
+    const p = await publish(); const c = await claim(p.id);
+    const path = `/reclamos/${c.id}/encuentro`;
+    expect((await api(path)).response.status).toBe(401);
+    expect((await api(path, "GET", undefined, accounts[2]!.token)).response.status).toBe(403);
+    expect((await api(path, "GET", undefined, accounts[0]!.token)).response.status).toBe(409);
+    await api(`/reclamos/${c.id}/aceptar`, "POST", undefined, accounts[0]!.token);
+    const body = { direccion: "Lima 775, CABA", propuestaId: null, intento: 1 };
+    expect((await api(path, "POST", body, accounts[2]!.token)).response.status).toBe(403);
+    expect((await api(path + "/aceptar", "POST", { propuestaId: "ajeno", intento: 1 }, accounts[2]!.token)).response.status).toBe(403);
+    expect((await propose(c.id, 0, "   ")).response.status).toBe(422);
+    expect((await propose(c.id, 0, "a".repeat(201))).response.status).toBe(422);
+    await api(`/publicaciones/${p.id}/resolver`, "POST", undefined, accounts[0]!.token);
+    expect((await api(path, "POST", body, accounts[0]!.token)).response.status).toBe(409);
+  });
+
+  test("dos respuestas a la misma propuesta no se pisan", async () => {
+    const p = await publish(); const c = await accept(p.id);
+    const first = await propose(c.id, 0);
+    const body = { propuestaId: first.data.encuentro.id, intento: 1 };
+    const path = `/reclamos/${c.id}/encuentro`;
+    const results = await Promise.all([
+      api(path, "POST", { ...body, direccion: "Lima 775, CABA" }, accounts[1]!.token),
+      api(path + "/aceptar", "POST", body, accounts[1]!.token),
+    ]);
+    expect(results.map((r) => r.response.status).sort()).toEqual([200, 409]);
+  });
+
+  test("un nuevo intento no reutiliza el encuentro anterior", async () => {
+    const p = await publish(); const c = await accept(p.id);
+    const first = await propose(c.id, 0);
+    await api(`/reclamos/${c.id}/cancelar`, "POST", undefined, accounts[1]!.token);
+    expect((await api(`/reclamos/${c.id}/encuentro`, "GET", undefined, accounts[0]!.token)).response.status).toBe(409);
+    const retry = await accept(p.id);
+    expect(retry.id).toBe(c.id);
+    const actual = await api(`/reclamos/${c.id}/encuentro`, "GET", undefined, accounts[0]!.token);
+    expect(actual.data.encuentro).toBeNull(); expect(actual.data.intento).toBe(2);
+    expect((await api(`/reclamos/${c.id}/encuentro`, "POST", {
+      direccion: "Lima 775, CABA", propuestaId: null, intento: 1,
+    }, accounts[0]!.token)).response.status).toBe(409);
+    expect((await api(`/reclamos/${c.id}/encuentro/aceptar`, "POST", {
+      propuestaId: first.data.encuentro.id, intento: 1,
+    }, accounts[1]!.token)).response.status).toBe(409);
+    expect((await propose(c.id, 0)).response.status).toBe(200);
+  });
+
+  test("el acuerdo permanece al reabrir la base", async () => {
+    db.$client.close();
+    const path = join(temp, "encuentro.sqlite");
+    db = createDatabase(path);
+    for (const account of accounts) {
+      db.insert(users).values({ id: account.id, email: account.email, name: account.id,
+        createdAt: nowIso(), emailVerifiedAt: nowIso() }).run();
+      account.token = (await createSession(db, account.id, 1)).token;
+    }
+    app = createApp(db);
+    const p = await publish(); const c = await accept(p.id);
+    const first = await propose(c.id, 0);
+    await api(`/reclamos/${c.id}/encuentro/aceptar`, "POST", {
+      propuestaId: first.data.encuentro.id, intento: 1,
+    }, accounts[1]!.token);
+    db.$client.close(); db = createDatabase(path); app = createApp(db);
+    const read = await api(`/reclamos/${c.id}/encuentro`, "GET", undefined, accounts[0]!.token);
+    expect(read.response.status).toBe(200);
+    expect(read.data.encuentro.estado).toBe("aceptado");
+    expect(read.data.encuentro.direccion).toBe("Av. Santa Fe 1234, CABA");
+  });
+});
+
+test("la migración de encuentros conserva reclamos e intentos existentes", () => {
+  const folder = join(temp, "before-meetings");
+  for (const name of readdirSync(new URL("../drizzle", import.meta.url))) {
+    if (name.startsWith("2026") && !name.endsWith("punto_encuentro")) {
+      cpSync(new URL(`../drizzle/${name}`, import.meta.url), join(folder, name), { recursive: true });
+    }
+  }
+  const path = join(temp, "upgrade.sqlite");
+  const raw = new Database(path, { create: true });
+  const old = drizzle({ client: raw });
+  migrate(old, { migrationsFolder: folder });
+  old.insert(users).values({ id: "owner", email: "owner@example.com", name: "Dueño", emailVerifiedAt: nowIso(), createdAt: nowIso() }).run();
+  old.insert(users).values({ id: "claimant", email: "claimant@example.com", name: "Reclamante", emailVerifiedAt: nowIso(), createdAt: nowIso() }).run();
+  old.insert(posts).values({ id: "post", userId: "owner", ...postBody(), tipo: "encontrado",
+    categoria: "Llaves", franja: "tarde", latitud: -34, longitud: -58, createdAt: nowIso(), updatedAt: nowIso() }).run();
+  old.insert(claims).values({ id: "claim", publicationId: "post", userId: "claimant",
+    mensaje: "Son mis llaves", estado: "vencido", intentos: 3, createdAt: nowIso(), updatedAt: nowIso() }).run();
+  raw.close();
+  const upgraded = createDatabase(path);
+  try {
+    const claim = upgraded.select().from(claims).where(eq(claims.id, "claim")).get()!;
+    expect(claim.intentos).toBe(3); expect(claim.estado).toBe("vencido");
+    expect(upgraded.$client.query("SELECT COUNT(*) AS total FROM hallado_encounters").get()).toEqual({ total: 0 });
+  } finally { upgraded.$client.close(); }
+});
