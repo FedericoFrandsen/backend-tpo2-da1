@@ -46,6 +46,19 @@ export const claims = sqliteTable("hallado_claims", {
   check("hallado_reclamo_estado_check", sql`${t.estado} IN ('pendiente','aceptado','rechazado','cancelado','vencido')`),
 ]);
 
+export const encounters = sqliteTable("hallado_encounters", {
+  id: text("id").primaryKey(),
+  claimId: text("claim_id").notNull().references(() => claims.id),
+  intento: integer("intento").notNull(),
+  direccion: text("direccion").notNull(),
+  propuestoPor: text("propuesto_por").notNull().references(() => users.id),
+  estado: text("estado", { enum: ["pendiente", "aceptado"] }).notNull().default("pendiente"),
+  updatedAt: text("updated_at").notNull(),
+}, (t) => [
+  uniqueIndex("hallado_encuentro_intento_unique").on(t.claimId, t.intento),
+  check("hallado_encuentro_estado_check", sql`${t.estado} IN ('pendiente','aceptado')`),
+]);
+
 export const follows = sqliteTable("hallado_follows", {
   publicationId: text("publication_id").notNull().references(() => halladoPublications.id),
   userId: text("user_id").notNull().references(() => users.id),

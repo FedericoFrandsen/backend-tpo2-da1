@@ -205,6 +205,18 @@
     {
       "method": "GET",
       "path": "/me/seguidas"
+    },
+    {
+      "method": "GET",
+      "path": "/reclamos/:id/encuentro"
+    },
+    {
+      "method": "POST",
+      "path": "/reclamos/:id/encuentro"
+    },
+    {
+      "method": "POST",
+      "path": "/reclamos/:id/encuentro/aceptar"
     }
   ]
 }
