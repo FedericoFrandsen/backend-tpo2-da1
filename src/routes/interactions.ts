@@ -5,7 +5,7 @@ import type { AppDatabase, Store } from "../database";
 import { claims, halladoPublications as posts, halladoReviews, messages } from "../db/schema";
 import { ApiError } from "../errors";
 import { acceptedClaim, expirePendingClaims, getClaim, getPost, isClaimExpired, notify, notifyFollowers, notifyMatches, ownerPost, publicProfile, serializeClaim, serializePost } from "../queries";
-import { cleanText, nowIso, paginate } from "../utils";
+import { cleanText, nowIso, paginate, reviewDeadline } from "../utils";
 
 function conversation(db: Store, claimId: string, userId: string) {
   const c = getClaim(db, claimId);
@@ -166,6 +166,8 @@ export function interactionRoutes(db: AppDatabase) {
         if (user.id !== p.userId && user.id !== c.userId) throw new ApiError(403, "FORBIDDEN", "Solo pueden valorar las partes de la devolución");
         const previous = tx.select().from(halladoReviews).where(and(eq(halladoReviews.publicationId, p.id), eq(halladoReviews.reviewerId, user.id))).get();
         if (previous) throw new ApiError(409, "ALREADY_REVIEWED", "Ya valoraste esta devolución");
+        const deadline = reviewDeadline(p.resolvedAt);
+        if (!deadline || nowIso() > deadline) throw new ApiError(409, "REVIEW_EXPIRED", "Terminó el plazo de 7 días para valorar");
         const reviewedUserId = user.id === p.userId ? c.userId : p.userId;
         const review = { id: crypto.randomUUID(), publicationId: p.id, reviewerId: user.id, reviewedUserId,
           positiva: body.positiva, comentario: (body.comentario ?? "").trim(), createdAt: nowIso() };

@@ -78,6 +78,18 @@ export const halladoReviews = sqliteTable("hallado_reviews", {
   index("hallado_valorado_idx").on(t.reviewedUserId),
 ]);
 
+export const thanks = sqliteTable("hallado_thanks", {
+  id: text("id").primaryKey(),
+  publicationId: text("publication_id").notNull().references(() => halladoPublications.id),
+  authorId: text("author_id").notNull().references(() => users.id),
+  recipientId: text("recipient_id").notNull().references(() => users.id),
+  mensaje: text("mensaje").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (t) => [
+  uniqueIndex("hallado_agradecimiento_unique").on(t.publicationId),
+  index("hallado_agradecimiento_usuario_idx").on(t.recipientId),
+]);
+
 export const alerts = sqliteTable("hallado_alerts", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id),
