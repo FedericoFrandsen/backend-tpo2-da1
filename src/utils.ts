@@ -2,6 +2,10 @@ import { config } from "./config";
 import { ApiError } from "./errors";
 
 export const nowIso = () => new Date().toISOString();
+export function reviewDeadline(resolvedAt: string | null) {
+  const time = resolvedAt ? Date.parse(resolvedAt) : NaN;
+  return Number.isFinite(time) ? new Date(time + 7 * 24 * 60 * 60 * 1000).toISOString() : null;
+}
 export const normalizeEmail = (email: string) => email.trim().toLowerCase();
 export const normalizeText = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 export function localDate(date = new Date()) {

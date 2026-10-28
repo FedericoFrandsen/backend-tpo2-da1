@@ -582,3 +582,123 @@ test("la migración de encuentros conserva reclamos e intentos existentes", () =
     expect(upgraded.$client.query("SELECT COUNT(*) AS total FROM hallado_encounters").get()).toEqual({ total: 0 });
   } finally { upgraded.$client.close(); }
 });
+
+describe("historial y valoraciones", () => {
+  async function resolve(extra: Record<string, unknown> = {}) {
+    const p = await publish(extra);
+    await accept(p.id);
+    expect((await api(`/publicaciones/${p.id}/resolver`, "POST", undefined, accounts[0]!.token)).response.status).toBe(200);
+    return p;
+  }
+  const history = (account: number, filters = "") => api(`/me/historial${filters}`, "GET", undefined, accounts[account]!.token);
+
+  test("separa devolví y recuperé en ambos tipos de publicación y protege el historial", async () => {
+    const found = await resolve();
+    const lost = await resolve({ tipo: "perdi" });
+    const returned = await history(0, "?tipo=devolvi");
+    expect(returned.data.items.map((x: any) => x.id)).toEqual([found.id]);
+    expect(returned.data.items[0].contraparte.id).toBe(accounts[1]!.id);
+    expect(returned.data.items[0].fecha).toBeTruthy();
+    expect(returned.data.items[0].objeto.titulo).toBe(found.titulo);
+    expect(returned.data.items[0].puedeValorar).toBe(true);
+    expect((await history(0, "?tipo=recupere")).data.items.map((x: any) => x.id)).toEqual([lost.id]);
+    expect((await history(1, "?tipo=devolvi")).data.items.map((x: any) => x.id)).toEqual([lost.id]);
+    expect((await history(1, "?tipo=recupere")).data.items.map((x: any) => x.id)).toEqual([found.id]);
+    expect((await history(2)).data.items).toEqual([]);
+    expect((await api("/me/historial")).response.status).toBe(401);
+    expect(JSON.stringify(returned.data)).not.toContain("Calle privada");
+  });
+
+  test("filtra fechas inclusivas en la zona local, pagina y rechaza filtros inválidos", async () => {
+    const older = await resolve();
+    const newer = await resolve();
+    db.update(posts).set({ resolvedAt: "2026-01-20T02:30:00.000Z" }).where(eq(posts.id, older.id)).run();
+    db.update(posts).set({ resolvedAt: "2026-01-21T15:00:00.000Z" }).where(eq(posts.id, newer.id)).run();
+    const date = localDate(new Date("2026-01-20T02:30:00.000Z"));
+    expect((await history(0, `?desde=${date}&hasta=${date}`)).data.items.map((x: any) => x.id)).toEqual([older.id]);
+    const page = await history(0, "?pageSize=1&page=2");
+    expect(page.data.total).toBe(2);
+    expect(page.data.items[0].id).toBe(older.id);
+    for (const filter of ["?desde=2026-02-30", "?hasta=no", "?desde=2026-02-01&hasta=2026-01-01", "?tipo=otro", "?page=0"]) {
+      expect((await history(0, filter)).response.status).toBe(422);
+    }
+  });
+
+  test("no incluye casos abiertos ni reclamos sin aceptar", async () => {
+    const open = await publish();
+    await claim(open.id);
+    expect((await history(0)).data.items).toEqual([]);
+    expect((await api(`/publicaciones/${open.id}/valoraciones`, "POST", { positiva: true }, accounts[1]!.token)).response.status).toBe(409);
+    expect((await api(`/publicaciones/${open.id}/agradecimientos`, "POST", { mensaje: "Gracias" }, accounts[1]!.token)).response.status).toBe(409);
+  });
+
+  test("cada parte valora una vez y actualiza la reputación", async () => {
+    const p = await resolve();
+    const path = `/publicaciones/${p.id}/valoraciones`;
+    expect((await api(path, "POST", { positiva: true }, accounts[2]!.token)).response.status).toBe(403);
+    expect((await api(path, "POST", { positiva: true, comentario: " Gracias " }, accounts[1]!.token)).response.status).toBe(201);
+    expect((await api(path, "POST", { positiva: false }, accounts[0]!.token)).response.status).toBe(201);
+    expect((await api(path, "POST", { positiva: false }, accounts[1]!.token)).data.error.code).toBe("ALREADY_REVIEWED");
+    expect((await history(1)).data.items[0].valoracion).toEqual({ positiva: true, comentario: "Gracias" });
+    expect((await history(1)).data.items[0].puedeValorar).toBe(false);
+    expect((await api(`/usuarios/${accounts[0]!.id}`)).data.reputation.positiveReviews).toBe(1);
+    expect((await api(`/usuarios/${accounts[1]!.id}`)).data.reputation.negativeReviews).toBe(1);
+  });
+
+  test("rechaza valoraciones fuera de los 7 días aunque se envíen directamente a la API", async () => {
+    const p = await resolve();
+    db.update(posts).set({ resolvedAt: new Date(Date.now() - 7 * 86400000 - 1000).toISOString() }).where(eq(posts.id, p.id)).run();
+    expect((await history(0)).data.items[0].puedeValorar).toBe(false);
+    for (const account of [0, 1]) {
+      const result = await api(`/publicaciones/${p.id}/valoraciones`, "POST", { positiva: true }, accounts[account]!.token);
+      expect(result.response.status).toBe(409);
+      expect(result.data.error.code).toBe("REVIEW_EXPIRED");
+    }
+    db.update(posts).set({ resolvedAt: new Date(Date.now() - 6 * 86400000).toISOString() }).where(eq(posts.id, p.id)).run();
+    expect((await api(`/publicaciones/${p.id}/valoraciones`, "POST", { positiva: true }, accounts[0]!.token)).response.status).toBe(201);
+  });
+
+  test("solo quien recupera puede agradecer, una vez, y el mensaje aparece en el perfil correcto", async () => {
+    for (const tipo of ["encontre", "perdi"]) {
+      const p = await resolve({ tipo });
+      const recoverer = tipo === "encontre" ? 1 : 0;
+      const returner = tipo === "encontre" ? 0 : 1;
+      const path = `/publicaciones/${p.id}/agradecimientos`;
+      for (const account of [returner, 2]) {
+        expect((await api(path, "POST", { mensaje: "Gracias" }, accounts[account]!.token)).response.status).toBe(403);
+      }
+      expect((await api(path, "POST", { mensaje: "   " }, accounts[recoverer]!.token)).response.status).toBe(422);
+      expect((await api(path, "POST", { mensaje: "x".repeat(501) }, accounts[recoverer]!.token)).response.status).toBe(422);
+      expect((await api(path, "POST", { mensaje: " Gracias por devolverlo " }, accounts[recoverer]!.token)).response.status).toBe(201);
+      expect((await api(path, "POST", { mensaje: "Otra vez" }, accounts[recoverer]!.token)).data.error.code).toBe("ALREADY_THANKED");
+      const publicThanks = await api(`/usuarios/${accounts[returner]!.id}/agradecimientos`);
+      expect(publicThanks.response.status).toBe(200);
+      expect(publicThanks.data.items[0].autor.id).toBe(accounts[recoverer]!.id);
+      expect(publicThanks.data.items[0].mensaje).toBe("Gracias por devolverlo");
+      expect(publicThanks.data.items[0]).not.toHaveProperty("publicationId");
+      const item = (await history(recoverer)).data.items.find((x: any) => x.id === p.id);
+      expect(item.agradecimiento.mensaje).toBe("Gracias por devolverlo");
+    }
+  });
+  test("historial, valoración y agradecimiento persisten al reabrir SQLite", async () => {
+    db.$client.close();
+    const path = join(temp, "historial.sqlite");
+    db = createDatabase(path);
+    for (const account of accounts) {
+      db.insert(users).values({ id: account.id, email: account.email, name: account.id,
+        createdAt: nowIso(), emailVerifiedAt: nowIso() }).run();
+      account.token = (await createSession(db, account.id, 1)).token;
+    }
+    app = createApp(db);
+    const p = await resolve();
+    expect((await api(`/publicaciones/${p.id}/valoraciones`, "POST", { positiva: true }, accounts[1]!.token)).response.status).toBe(201);
+    expect((await api(`/publicaciones/${p.id}/agradecimientos`, "POST", { mensaje: "Gracias por las llaves" }, accounts[1]!.token)).response.status).toBe(201);
+    db.$client.close(); db = createDatabase(path); app = createApp(db);
+    const item = (await history(1)).data.items[0];
+    expect(item.id).toBe(p.id);
+    expect(item.valoracion.positiva).toBe(true);
+    expect(item.agradecimiento.mensaje).toBe("Gracias por las llaves");
+    expect((await api(`/usuarios/${accounts[0]!.id}/agradecimientos`)).data.items[0].mensaje).toBe("Gracias por las llaves");
+  });
+
+});

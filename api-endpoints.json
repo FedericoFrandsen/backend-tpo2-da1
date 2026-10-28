@@ -217,6 +217,18 @@
     {
       "method": "POST",
       "path": "/reclamos/:id/encuentro/aceptar"
+    },
+    {
+      "method": "GET",
+      "path": "/me/historial"
+    },
+    {
+      "method": "POST",
+      "path": "/publicaciones/:id/agradecimientos"
+    },
+    {
+      "method": "GET",
+      "path": "/usuarios/:id/agradecimientos"
     }
   ]
 }
