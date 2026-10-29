@@ -18,6 +18,27 @@ import { PASSWORD_MAX_LENGTH, validarPassword } from "../validations/auth";
 
 const MAX_OTP_ATTEMPTS = 5;
 const OTP_RESEND_COOLDOWN_MS = 30_000;
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOGIN_WINDOW_MS = 900_000;
+
+/**
+ * Reserva un intento de login con una sola sentencia atómica, antes del trabajo costoso (hash de la contraseña):
+ * cuenta el intento y falla con 429 si la ventana ya agotó los permitidos. Así, peticiones simultáneas no pueden
+ * superar el límite. Un login correcto borra el contador; uno incorrecto deja el intento ya contado.
+ */
+function reserveLoginAttempt(db: AppDatabase, login: string) {
+  const now = nowIso();
+  const expired = sql`${loginAttempts.windowStart} <= ${new Date(Date.now() - LOGIN_WINDOW_MS).toISOString()}`;
+  const reserved = db.insert(loginAttempts).values({ login, attempts: 1, windowStart: now }).onConflictDoUpdate({
+    target: loginAttempts.login,
+    set: {
+      attempts: sql`CASE WHEN ${expired} THEN 1 ELSE ${loginAttempts.attempts} + 1 END`,
+      windowStart: sql`CASE WHEN ${expired} THEN ${now} ELSE ${loginAttempts.windowStart} END`,
+    },
+    setWhere: sql`${expired} OR ${loginAttempts.attempts} < ${MAX_LOGIN_ATTEMPTS}`,
+  }).returning({ attempts: loginAttempts.attempts }).get();
+  if (!reserved) throw new ApiError(429, "LOGIN_LOCKED", "Demasiados intentos. Esperá 15 minutos");
+}
 
 const purposeSchema = t.Union([
   t.Literal("registration"),
@@ -313,10 +334,7 @@ export function authRoutes(db: AppDatabase, deliver: OtpSender = sendOtp) {
     })
     .post("/login/password", async ({ body }) => {
       const login = normalizeEmail(body.email);
-      const previous = db.select().from(loginAttempts).where(eq(loginAttempts.login, login)).get();
-      if (previous && Date.now() - Date.parse(previous.windowStart) < 900_000 && previous.attempts >= 5) {
-        throw new ApiError(429, "LOGIN_LOCKED", "Demasiados intentos. Esperá 15 minutos");
-      }
+      reserveLoginAttempt(db, login);
       const user = db
         .select({ id: users.id, passwordHash: users.passwordHash })
         .from(users)
@@ -324,14 +342,6 @@ export function authRoutes(db: AppDatabase, deliver: OtpSender = sendOtp) {
         .get();
 
       if (!user?.passwordHash || !(await Bun.password.verify(body.password, user.passwordHash))) {
-        db.transaction((tx) => {
-          const latest = tx.select().from(loginAttempts).where(eq(loginAttempts.login, login)).get();
-          const sameWindow = latest && Date.now() - Date.parse(latest.windowStart) < 900_000;
-          tx.insert(loginAttempts).values({ login, attempts: 1, windowStart: nowIso() }).onConflictDoUpdate({
-            target: loginAttempts.login,
-            set: { attempts: sameWindow ? latest.attempts + 1 : 1, windowStart: sameWindow ? latest.windowStart : nowIso() },
-          }).run();
-        });
         throw new ApiError(401, "INVALID_CREDENTIALS", "Usuario/email o contraseña incorrectos");
       }
 

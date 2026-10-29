@@ -163,6 +163,33 @@ describe("Hallado", () => {
     expect((await api("/auth/logout", "POST", undefined, token)).response.status).toBe(200);
     expect((await api("/me", "GET", undefined, token)).response.status).toBe(401);
   });
+  test("login simultáneo con contraseña incorrecta no supera el límite de intentos", async () => {
+    const email = accounts[0]!.email;
+    const attempt = (address: string) => api("/auth/login/password", "POST", { email: address, password: "Wrong123" });
+    const statuses = (await Promise.all(Array.from({ length: 12 }, () => attempt(email)))).map((r) => r.response.status);
+    // Solo los 5 intentos permitidos llegan a verificar la contraseña; el resto se rechaza antes de ese trabajo.
+    expect(statuses.filter((s) => s === 401)).toHaveLength(5);
+    expect(statuses.filter((s) => s === 429)).toHaveLength(7);
+    expect(db.select().from(loginAttempts).where(eq(loginAttempts.login, email)).get()!.attempts).toBe(5);
+    // Bloqueada, ni siquiera la contraseña correcta pasa; vencida la ventana se reinicia el contador.
+    expect((await api("/auth/login/password", "POST", { email, password })).response.status).toBe(429);
+    db.update(loginAttempts).set({ windowStart: new Date(Date.now() - 901_000).toISOString() }).run();
+    const retried = (await Promise.all(Array.from({ length: 8 }, () => attempt(email)))).map((r) => r.response.status);
+    expect(retried.filter((s) => s === 401)).toHaveLength(5); expect(retried.filter((s) => s === 429)).toHaveLength(3);
+    // Un usuario inexistente también consume intentos, sin afectar a otras cuentas.
+    const unknown = (await Promise.all(Array.from({ length: 7 }, () => attempt("nadie@example.com")))).map((r) => r.response.status);
+    expect(unknown.filter((s) => s === 401)).toHaveLength(5); expect(unknown.filter((s) => s === 429)).toHaveLength(2);
+    expect((await api("/auth/login/password", "POST", { email: accounts[1]!.email, password })).response.status).toBe(200);
+  });
+  test("un login correcto reinicia el contador de intentos fallidos", async () => {
+    const email = accounts[0]!.email;
+    for (let i = 0; i < 4; i++) expect((await api("/auth/login/password", "POST", { email, password: "Wrong123" })).response.status).toBe(401);
+    expect(db.select().from(loginAttempts).where(eq(loginAttempts.login, email)).get()!.attempts).toBe(4);
+    expect((await api("/auth/login/password", "POST", { email, password })).response.status).toBe(200);
+    expect(db.select().from(loginAttempts).where(eq(loginAttempts.login, email)).get()).toBeUndefined();
+    for (let i = 0; i < 5; i++) expect((await api("/auth/login/password", "POST", { email, password: "Wrong123" })).response.status).toBe(401);
+    expect((await api("/auth/login/password", "POST", { email, password })).response.status).toBe(429);
+  });
   test("recuperar desbloquea login y revoca OTP de acceso anteriores", async () => {
     const email = accounts[0]!.email;
     await api("/auth/otp/request", "POST", { email, purpose: "login" });
