@@ -1,12 +1,38 @@
 # Contrato para conectar Expo
 
-Este documento describe el backend entregado. El ZIP no modifica el frontend: sus hooks todavía usan mocks. Se pueden conectar conservando los componentes y el manejo de loading/error.
+Este documento describe el contrato del backend y cómo lo consume la app Expo. La app ya usa la API real en todas sus pantallas; no hay datos simulados en el frontend.
+
+## Endpoints que usa la app
+
+Cada grupo está asociado al servicio del frontend (`services/*.js` en el repositorio `hallado`) que lo llama. La columna «Documentado aquí» indica si este archivo tiene sección de contrato para ese grupo.
+
+| Grupo | Servicio / hook | Endpoints | Documentado aquí |
+| --- | --- | --- | --- |
+| Sesión | `hooks/useAuth.js`, `services/sesion.js` | `POST /auth/otp/request`, `POST /auth/otp/check`, `POST /auth/otp/verify`, `POST /auth/otp/resend`, `POST /auth/login/password`, `POST /auth/logout`, `GET /me` | Sí |
+| Perfil | `services/perfiles.js` | `GET /me`, `PATCH /me`, `GET /usuarios/:id`, `POST /uploads/images` | Sí |
+| Publicaciones y búsqueda | `services/publicaciones.js` | `GET /publicaciones`, `GET /publicaciones/:id`, `POST /publicaciones`, `PATCH /publicaciones/:id`, `DELETE /publicaciones/:id`, `POST /publicaciones/:id/renovar`, `GET /mis-publicaciones`, `POST /uploads/images`, `POST /uploads/pruebas` | Sí |
+| Conexión | `services/conexion.js` | `GET /categorias` (sondeo de disponibilidad) | Sí |
+| Seguidas | `services/publicaciones.js` | `GET /me/seguidas`, `POST` y `DELETE /publicaciones/:id/seguir` | Sí |
+| Reclamos | `services/publicaciones.js` | `POST /publicaciones/:id/reclamos`, `GET /me/reclamos`, `GET /publicaciones/:id/reclamos`, `POST /reclamos/:id/aceptar`, `POST /reclamos/:id/rechazar` | Sí |
+| Mensajes | `services/mensajes.js` | `GET` y `POST /reclamos/:id/mensajes` | Sí |
+| Encuentros | `services/encuentros.js` | `GET` y `POST /reclamos/:id/encuentro`, `POST /reclamos/:id/encuentro/aceptar` | No; ver `/docs` |
+| Devoluciones e historial | `services/historial.js` | `GET /me/historial`, `POST /publicaciones/:id/resolver`, `POST /publicaciones/:id/valoraciones`, `POST /publicaciones/:id/agradecimientos`, `GET /usuarios/:id/agradecimientos` | Parcial: resolver y valoraciones sí; historial y agradecimientos no, ver `/docs` |
+| Alertas | `services/alertas.js`, `hooks/useAlertas.js` | `GET` y `POST /alertas`, `PATCH` y `DELETE /alertas/:id`, `POST /alertas/:id/leida` | Sí |
+| Notificaciones | `services/notificaciones.js`, `hooks/useNovedades.js` | `GET /notificaciones`, `POST /notificaciones/:id/leida` | Sí |
+| Imágenes | `components/ImagenPrivada.js` y URLs de `services/publicaciones.js` | `GET /uploads/:filename`; `GET /uploads/pruebas/:filename` enviando `Authorization` | Sí |
+
+Notas de uso:
+
+- La app toma la base de la API de `EXPO_PUBLIC_API_URL` (ver el README del frontend). Sin esa variable usa `http://10.0.2.2:3000`.
+- La app no llama a `GET /barrios`: sus zonas vienen de la constante `ZONAS` del frontend (`data/searchDemo.js`). Esa lista tiene que coincidir con la del backend, porque el reclamo «Lo encontré» valida el barrio contra `GET /barrios`.
+- La app no llama a `/me/busquedas`: las búsquedas recientes se guardan en el dispositivo.
 
 ## Cliente HTTP
 
 - PC: `http://localhost:3000`
 - Emulador Android: `http://10.0.2.2:3000`
 - Dispositivo físico: `http://IP_DE_TU_PC:3000`
+- En la app, la base se configura con `EXPO_PUBLIC_API_URL` (ver el README del frontend).
 - JSON: `Content-Type: application/json`.
 - Rutas privadas: `Authorization: Bearer <session.token>`.
 - Guardar el token en Expo SecureStore. Al abrir la app, recuperarlo y pedir `GET /me`. Un 401 invalida la sesión local. La biometría solo desbloquea el acceso local a la sesión.
@@ -39,7 +65,7 @@ Solicitud/comprobación de OTP no crea cuentas ni sesiones. Registro, recupero e
 }
 ```
 
-El campo `usuario` real incluye el perfil privado completo. El mock de auth usa `nombre`; se puede asignar `nombre: respuesta.usuario.name` sin cambiar las pantallas. Después del recupero se puede usar la sesión nueva o volver al login. Las sesiones anteriores y los OTP de acceso emitidos antes del cambio quedan invalidados.
+El campo `usuario` real incluye el perfil privado completo. `hooks/useAuth.js` agrega `nombre: usuario.name` para que las pantallas sigan usando `nombre`. Después del recupero se puede usar la sesión nueva o volver al login. Las sesiones anteriores y los OTP de acceso emitidos antes del cambio quedan invalidados.
 
 El parámetro `purpose` tiene que viajar entre pantallas: no se puede deducir solo del email. El código no se sustituye por una constante y se vuelve a verificar al guardar la contraseña. El login por OTP de TP1 (`purpose: "login"`) también se conserva para compatibilidad, aunque las pantallas de Hallado usan contraseña.
 
@@ -97,13 +123,15 @@ Al usar GPS, enviar `latitud` y `longitud` como parámetros planos, no el objeto
 
 Cada resultado tiene `id, tipo, titulo, descripcion, categoria, barrio, fecha, franja, estado, fotos, latitud, longitud, ubicacion, distancia, creadaEn, actualizadaEn, resueltaEn, venceAt`.
 
-`tipo` es **perdido/encontrado** en las respuestas. Al crear se aceptan también **perdi/encontre**, como manda hoy `CreatePostScreen`. `estado` es **abierta/en_reclamo/resuelta/vencida** (ver «Vencimiento y renovación»); el mock de detalle que usa `enReclamo` debe adaptarse a `en_reclamo` al conectar. El frontend debe usar `items` del servidor y quitar la paginación local para no paginar dos veces.
+`tipo` es **perdido/encontrado** en las respuestas. Al crear se aceptan también **perdi/encontre**, como manda hoy `CreatePostScreen`. `estado` es **abierta/en_reclamo/resuelta/vencida** (ver «Vencimiento y renovación»). La app usa `en_reclamo` tal como lo devuelve la API y toma `items` de la respuesta para paginar.
 
 Una búsqueda autenticada se registra automáticamente en el historial:
 
 - `GET /me/busquedas`: últimas cinco búsquedas únicas.
 - `POST /me/busquedas`: cuerpo igual a los filtros del frontend; para guardar sin buscar.
 - `DELETE /me/busquedas`: limpiar historial.
+
+La app móvil no usa estos endpoints: guarda las búsquedas recientes en el dispositivo.
 
 ## Crear/editar publicaciones y fotos
 

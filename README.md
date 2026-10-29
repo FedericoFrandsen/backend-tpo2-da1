@@ -30,7 +30,7 @@ Las migraciones se aplican automáticamente. `db:seed` es opcional, idempotente 
 - Android Emulator: http://10.0.2.2:3000
 - Celular físico: usá la IPv4 de tu PC, misma red Wi-Fi y acceso al puerto 3000 en el firewall.
 
-El servidor escucha en `0.0.0.0`. En Expo el frontend todavía usa mocks: reemplazar el backend no conecta automáticamente las pantallas. El contrato para reemplazar los mocks está en `docs/INTEGRACION.md`.
+El servidor escucha en `0.0.0.0`. La app Expo consume esta API real, así que el backend tiene que estar corriendo para usarla. La URL que usa la app se configura en el frontend con `EXPO_PUBLIC_API_URL`, y el contrato de cada grupo de endpoints está en `docs/INTEGRACION.md`.
 
 ## Reemplazar el backend que ya tenés
 
@@ -68,7 +68,7 @@ Se crean al ejecutar `bun run db:seed`, exclusivamente fuera de producción:
 
 Hay 216 publicaciones abiertas (las seis categorías y barrios), devoluciones concretadas, reputación, insignia y un reclamo pendiente. El seed usa fechas relativas al día en que se ejecuta. Si volvés a ejecutarlo otro día, las publicaciones ya existentes conservan sus fechas; creá nuevas publicaciones para probar alertas nuevas.
 
-Si una cuenta demo ya existía, se conserva su contraseña anterior. Las fotos de los ejemplos están vacías para que puedas probar la subida real desde la app.
+Si una cuenta demo ya existía, se conserva su contraseña anterior. Las fotos de los ejemplos están vacías para que puedas probar la subida real desde la app. Para probar varios roles, usá cuentas diferentes.
 
 ## Funcionalidades
 
@@ -91,10 +91,11 @@ Si una cuenta demo ya existía, se conserva su contraseña anterior. Las fotos d
 - Seguir publicaciones y recibir sus novedades.
 - Alertas de búsqueda, coincidencias y notificaciones persistentes con estado de lectura.
 - Subida autenticada de imágenes JPEG/PNG/WebP, hasta 5 MB por archivo y hasta cinco fotos por publicación.
+- Sin push de Expo ni SMS: alertas, notificaciones y mensajes se consultan por HTTP.
 
 La biometría, los permisos GPS, la selección de fotos y el almacenamiento seguro del token corresponden a Expo/dispositivo. El backend no solicita ni guarda datos biométricos.
 
-## OTP por consola o email real
+## Códigos OTP por consola
 
 La configuración inicial permite probar sin contratar ni configurar servicios. Con `EMAIL_MODE=console`, el código aparece en la terminal que ejecuta el servidor:
 
@@ -104,7 +105,9 @@ La configuración inicial permite probar sin contratar ni configurar servicios. 
 
 Los códigos son aleatorios: **123456 no es un código fijo**. No se devuelven por HTTP. Vencen según `OTP_TTL_MINUTES` (10 por defecto), permiten cinco errores y requieren 30 segundos entre solicitudes. Al reenviar se invalida el anterior. `/auth/otp/check` no consume el código; `/auth/otp/verify` lo consume al completar la operación y vuelve a comprobarlo.
 
-Para enviar emails reales, configurá una cuenta y un remitente habilitado en Resend y completá `.env`:
+## Correo real (OTP)
+
+Para enviar los códigos por email con Resend, cambiá estas variables en `.env` (los nombres están en `.env.example`):
 
 ```dotenv
 EMAIL_MODE=resend
@@ -112,9 +115,19 @@ RESEND_API_KEY=tu_clave
 EMAIL_FROM=Hallado <tu-remitente@tu-dominio.com>
 ```
 
-Reiniciá el servidor. Se implementó el adaptador de Resend; las pruebas simulan respuestas del proveedor, no se enviaron emails reales ni se usaron credenciales tuyas. Documentación del proveedor: https://resend.com/docs/api-reference/emails/send-email
+| Variable | Qué hace |
+| --- | --- |
+| `EMAIL_MODE` | `console` (por defecto) o `resend`. Cualquier otro valor impide arrancar. |
+| `RESEND_API_KEY` | Clave de API de Resend. Obligatoria con `resend`. |
+| `EMAIL_FROM` | Remitente del mensaje, en el formato que acepte Resend. Obligatorio con `resend`. |
+| `OTP_TTL_MINUTES` | Vencimiento del código en minutos (10 por defecto). Aparece en el texto del email. |
 
-En producción se exige un proveedor real; la API no arranca con OTP por consola. Las alertas y mensajes se consultan por HTTP: no hay push de Expo ni SMS. Para probar varios roles, usá cuentas diferentes.
+- Con `EMAIL_MODE=resend`, si falta `RESEND_API_KEY` o `EMAIL_FROM` el servidor no arranca y el error indica cuál falta.
+- Con `NODE_ENV=production` la API no arranca con `EMAIL_MODE=console`.
+- Si Resend no responde en 10 segundos o devuelve error, la API responde `503 EMAIL_DELIVERY_FAILED`.
+- Reiniciá el servidor después de cambiar `.env`.
+
+Estado de la prueba: el adaptador de Resend está implementado y las pruebas simulan las respuestas del proveedor. No se envió ningún email real ni se usaron credenciales reales. Documentación del envío: https://resend.com/docs/api-reference/emails/send-email
 
 ## Persistencia y migraciones
 
@@ -155,4 +168,4 @@ La colección `docs/Hallado.postman_collection.json` se puede importar en Postma
 
 ## Validación de la entrega
 
-Las pruebas usan SQLite en memoria y carpetas temporales. Incluyen registro por etapas, contraseña requerida, OTP, concurrencia, recupero, logout, permisos, búsqueda, persistencia, reclamos, privacidad, mensajes, devoluciones, reputación, insignias, seguidores, alertas, imágenes y migración desde TP1. La aplicación frontend y un dispositivo Android se verifican al conectar los hooks: este ZIP no cambia la app móvil.
+Las pruebas usan SQLite en memoria y carpetas temporales. Incluyen registro por etapas, contraseña requerida, OTP, concurrencia, recupero, logout, permisos, búsqueda, persistencia, reclamos, privacidad, mensajes, devoluciones, reputación, insignias, seguidores, alertas, imágenes y migración desde TP1. Las pruebas cubren solo el backend. La app Expo se verifica aparte, con `npx expo export --platform android` en el frontend (ver su README).
