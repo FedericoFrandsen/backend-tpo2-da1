@@ -15,6 +15,14 @@
       "path": "/uploads/images"
     },
     {
+      "method": "POST",
+      "path": "/uploads/pruebas"
+    },
+    {
+      "method": "GET",
+      "path": "/uploads/pruebas/:filename"
+    },
+    {
       "method": "GET",
       "path": "/uploads/:filename"
     },
@@ -189,6 +197,10 @@
     {
       "method": "PATCH",
       "path": "/publicaciones/:id"
+    },
+    {
+      "method": "POST",
+      "path": "/publicaciones/:id/renovar"
     },
     {
       "method": "DELETE",

@@ -36,5 +36,16 @@ export const publicationBody = t.Object({
   franja: t.Union([t.Literal("manana"), t.Literal("tarde"), t.Literal("noche")]),
   direccionExacta: t.Optional(t.Union([t.String({ maxLength: 250 }), t.Null()])),
   fotos: t.Optional(t.Array(t.String({ maxLength: 250 }), { maxItems: 5, uniqueItems: true })),
+  // Verificación del publicador: obligatoria en "encontrado", se ignora en "perdido".
+  preguntaVerificacion: t.Optional(t.Union([t.String({ maxLength: 200 }), t.Null()])),
+  respuestaVerificacion: t.Optional(t.Union([t.String({ maxLength: 200 }), t.Null()])),
+  // Identificador generado por el cliente para reintentar el alta sin duplicar (cola offline).
+  clientId: t.Optional(t.String({ minLength: 8, maxLength: 100 })),
 });
 export type PublicationBody = typeof publicationBody.static;
+export const claimBody = t.Object({
+  mensaje: t.String({ minLength: 5, maxLength: 1000 }),
+  respuestaVerificacion: t.Optional(t.Union([t.String({ maxLength: 200 }), t.Null()])),
+  fotoPrueba: t.Optional(t.Union([t.String({ maxLength: 250 }), t.Null()])),
+  barrio: t.Optional(t.Union([t.String({ maxLength: 100 }), t.Null()])),
+});

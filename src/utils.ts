@@ -6,6 +6,9 @@ export function reviewDeadline(resolvedAt: string | null) {
   const time = resolvedAt ? Date.parse(resolvedAt) : NaN;
   return Number.isFinite(time) ? new Date(time + 7 * 24 * 60 * 60 * 1000).toISOString() : null;
 }
+export const PUBLICATION_TTL_DAYS = 30;
+/** Fecha de vencimiento de una publicación: `desde` (por defecto ahora) + 30 días. */
+export const publicationExpiry = (desde = Date.now()) => new Date(desde + PUBLICATION_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 export const normalizeEmail = (email: string) => email.trim().toLowerCase();
 export const normalizeText = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 export function localDate(date = new Date()) {

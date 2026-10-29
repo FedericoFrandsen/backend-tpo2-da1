@@ -34,7 +34,15 @@ async function api(path: string, method = "GET", body?: unknown, token?: string)
 }
 function postBody(extra: Record<string, unknown> = {}) {
   return { tipo: "encontre", titulo: "Llaves con llavero azul", descripcion: "Juego de tres llaves con un llavero de color azul.",
-    categoria: "Llaves", barrio: "Palermo", fecha: localDate(), franja: "tarde", direccionExacta: "Calle privada 123", fotos: [], ...extra };
+    categoria: "Llaves", barrio: "Palermo", fecha: localDate(), franja: "tarde", direccionExacta: "Calle privada 123", fotos: [],
+    preguntaVerificacion: "¿Qué dibujo tiene el llavero?", respuestaVerificacion: "Una estrella azul", ...extra };
+}
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a++sAAAAASUVORK5CYII=", "base64");
+async function uploadProof(account = 1, path = "/uploads/pruebas") {
+  const form = new FormData(); form.set("file", new File([PNG], "prueba.png", { type: "image/png" }));
+  const result = await api(path, "POST", form, accounts[account]!.token);
+  expect(result.response.status).toBe(201);
+  return result.data as { url: string; filename: string };
 }
 const filters = { situacion: "perdi", categoria: "Llaves", zona: "Palermo", periodo: "semana" };
 const query = (extra: Record<string, string> = {}) => `/publicaciones?${new URLSearchParams({ ...filters, ...extra })}`;
@@ -43,8 +51,12 @@ async function publish(extra: Record<string, unknown> = {}, owner = 0) {
   expect(result.response.status).toBe(201);
   return result.data;
 }
-async function claim(postId: string, claimant = 1) {
-  const result = await api(`/publicaciones/${postId}/reclamos`, "POST", { mensaje: "Son mis llaves, tienen una marca especial." }, accounts[claimant]!.token);
+async function claim(postId: string, claimant = 1, extra: Record<string, unknown> = {}) {
+  // «Es mío» responde la pregunta del hallazgo; «Lo encontré» adjunta foto privada y barrio.
+  const tipo = (await api(`/publicaciones/${postId}`)).data.tipo;
+  const evidence = tipo === "encontrado" ? { respuestaVerificacion: "Una estrella azul" }
+    : { fotoPrueba: (await uploadProof(claimant)).url, barrio: "Palermo" };
+  const result = await api(`/publicaciones/${postId}/reclamos`, "POST", { mensaje: "Son mis llaves, tienen una marca especial.", ...evidence, ...extra }, accounts[claimant]!.token);
   expect(result.response.status).toBe(201);
   return result.data;
 }
@@ -701,4 +713,242 @@ describe("historial y valoraciones", () => {
     expect((await api(`/usuarios/${accounts[0]!.id}/agradecimientos`)).data.items[0].mensaje).toBe("Gracias por las llaves");
   });
 
+});
+
+describe("verificación del publicador, pruebas privadas, vencimiento e idempotencia", () => {
+  const ANSWER = "Una estrella azul";
+  const expire = (id: string, days = 1) =>
+    db.update(posts).set({ venceAt: new Date(Date.now() - days * 86_400_000).toISOString() }).where(eq(posts.id, id)).run();
+  const lost = (extra: Record<string, unknown> = {}) => publish({ tipo: "perdi", ...extra });
+  const search = async (token?: string) => (await api(query(), "GET", undefined, token)).data.items.map((x: any) => x.id);
+
+  test("hallazgo exige pregunta y respuesta; en perdido se ignoran y el dueño puede editarlas", async () => {
+    const noQuestion = await api("/publicaciones", "POST", postBody({ preguntaVerificacion: undefined, respuestaVerificacion: undefined }), accounts[0]!.token);
+    expect(noQuestion.response.status).toBe(422); expect(noQuestion.data.error.code).toBe("VERIFICATION_QUESTION_REQUIRED");
+    const noAnswer = await api("/publicaciones", "POST", postBody({ respuestaVerificacion: "  " }), accounts[0]!.token);
+    expect(noAnswer.response.status).toBe(422); expect(noAnswer.data.error.code).toBe("VERIFICATION_ANSWER_REQUIRED");
+    const found = await publish();
+    expect(found.preguntaVerificacion).toBe("¿Qué dibujo tiene el llavero?"); expect(found.respuestaVerificacion).toBe(ANSWER);
+    const l = await lost({ preguntaVerificacion: "Ignorada", respuestaVerificacion: "Ignorada" });
+    expect(l.preguntaVerificacion).toBeNull(); expect(l.respuestaVerificacion).toBeNull();
+    const edited = await api(`/publicaciones/${found.id}`, "PATCH", { respuestaVerificacion: "Una luna roja" }, accounts[0]!.token);
+    expect(edited.data.respuestaVerificacion).toBe("Una luna roja"); expect(edited.data.preguntaVerificacion).toBe("¿Qué dibujo tiene el llavero?");
+    const cleared = await api(`/publicaciones/${found.id}`, "PATCH", { preguntaVerificacion: "" }, accounts[0]!.token);
+    expect(cleared.response.status).toBe(422);
+    expect((await api(`/publicaciones/${found.id}`, "PATCH", { preguntaVerificacion: "Otra" }, accounts[1]!.token)).response.status).toBe(403);
+  });
+  test("un hallazgo previo sin pregunta se puede seguir editando y reclamando", async () => {
+    const found = await publish();
+    db.update(posts).set({ preguntaVerificacion: null, respuestaVerificacion: null }).where(eq(posts.id, found.id)).run();
+    expect((await api(`/publicaciones/${found.id}`, "PATCH", { titulo: "Llaves viejas" }, accounts[0]!.token)).response.status).toBe(200);
+    const res = await api(`/publicaciones/${found.id}/reclamos`, "POST", { mensaje: "Son mis llaves." }, accounts[1]!.token);
+    expect(res.response.status).toBe(201);
+  });
+  test("la respuesta privada solo la ve el dueño: nunca terceros, búsquedas, alertas ni seguidas", async () => {
+    const found = await publish();
+    const mine = (await api(`/publicaciones/${found.id}`, "GET", undefined, accounts[0]!.token)).data;
+    expect(mine.respuestaVerificacion).toBe(ANSWER);
+    expect((await api("/mis-publicaciones", "GET", undefined, accounts[0]!.token)).data.items[0].respuestaVerificacion).toBe(ANSWER);
+    await api("/alertas", "POST", { filtros: filters }, accounts[2]!.token);
+    await api(`/publicaciones/${found.id}/seguir`, "POST", undefined, accounts[2]!.token);
+    await api(`/publicaciones/${found.id}`, "PATCH", { titulo: "Llaves actualizadas" }, accounts[0]!.token);
+    const c = await claim(found.id, 1, { respuestaVerificacion: "Mi respuesta" });
+    for (const token of [undefined, accounts[1]!.token, accounts[2]!.token]) {
+      const detail = await api(`/publicaciones/${found.id}`, "GET", undefined, token);
+      expect(detail.data.preguntaVerificacion).toBe("¿Qué dibujo tiene el llavero?");
+      expect(detail.data).not.toHaveProperty("respuestaVerificacion");
+    }
+    const exposed = [
+      await api(query(), "GET", undefined, accounts[2]!.token), await api(query()),
+      await api("/me/seguidas", "GET", undefined, accounts[2]!.token), await api("/notificaciones", "GET", undefined, accounts[2]!.token),
+      await api("/alertas", "GET", undefined, accounts[2]!.token), await api("/me/historial", "GET", undefined, accounts[2]!.token),
+      await api("/me/reclamos", "GET", undefined, accounts[1]!.token),
+      await api(`/reclamos/${c.id}`, "GET", undefined, accounts[1]!.token),
+    ];
+    for (const r of exposed) {
+      expect(r.response.status).toBe(200);
+      expect(JSON.stringify(r.data)).not.toContain(ANSWER);
+    }
+    const found1 = (await api(query(), "GET", undefined, accounts[2]!.token)).data.items[0];
+    expect(found1).not.toHaveProperty("respuestaVerificacion"); expect(found1).not.toHaveProperty("preguntaVerificacion");
+    // El dueño compara la respuesta del reclamante con la suya, tanto en la bandeja de recibidos como en el detalle.
+    const received = (await api("/me/reclamos?tipo=recibidos", "GET", undefined, accounts[0]!.token)).data.items[0];
+    expect(received.respuestaVerificacion).toBe("Mi respuesta");
+    expect(received.publicacion.respuestaVerificacion).toBe(ANSWER);
+  });
+  test("«Es mío» exige responder la pregunta y el reclamo estructurado solo lo ven los participantes", async () => {
+    const found = await publish();
+    const missing = await api(`/publicaciones/${found.id}/reclamos`, "POST", { mensaje: "Son mis llaves." }, accounts[1]!.token);
+    expect(missing.response.status).toBe(422); expect(missing.data.error.code).toBe("VERIFICATION_ANSWER_REQUIRED");
+    expect((await api(`/publicaciones/${found.id}/reclamos`, "POST", { mensaje: "Son mis llaves.", respuestaVerificacion: "   " }, accounts[1]!.token)).response.status).toBe(422);
+    const c = await claim(found.id, 1, { respuestaVerificacion: "  Una estrella  " });
+    expect(c.respuestaVerificacion).toBe("Una estrella"); expect(c.mensaje).toBeTruthy(); expect(c.intentos).toBe(1);
+    const asOwner = (await api(`/publicaciones/${found.id}/reclamos`, "GET", undefined, accounts[0]!.token)).data.items[0];
+    expect(asOwner.respuestaVerificacion).toBe("Una estrella");
+    const detail = (await api(`/reclamos/${c.id}`, "GET", undefined, accounts[0]!.token)).data;
+    expect(detail.respuestaVerificacion).toBe("Una estrella"); expect(detail.publicacion.respuestaVerificacion).toBe(ANSWER);
+    expect((await api(`/reclamos/${c.id}`, "GET", undefined, accounts[1]!.token)).data.respuestaVerificacion).toBe("Una estrella");
+    expect((await api(`/publicaciones/${found.id}`, "GET", undefined, accounts[1]!.token)).data.miReclamo.respuestaVerificacion).toBe("Una estrella");
+    expect((await api(`/reclamos/${c.id}`, "GET", undefined, accounts[2]!.token)).response.status).toBe(403);
+    expect((await api("/me/reclamos", "GET", undefined, accounts[2]!.token)).data.items).toHaveLength(0);
+    // Reintento tras rechazo: reemplaza la respuesta y respeta el tope de intentos.
+    await api(`/reclamos/${c.id}/rechazar`, "POST", undefined, accounts[0]!.token);
+    const again = await claim(found.id, 1, { respuestaVerificacion: "Una luna" });
+    expect(again.intentos).toBe(2); expect(again.respuestaVerificacion).toBe("Una luna");
+  });
+  test("«Lo encontré» exige foto de prueba propia y un barrio válido", async () => {
+    const l = await lost();
+    const base = { mensaje: "Encontré tus llaves en la calle." };
+    const post = (extra: Record<string, unknown>, who = 1) => api(`/publicaciones/${l.id}/reclamos`, "POST", { ...base, ...extra }, accounts[who]!.token);
+    const proof = await uploadProof(1);
+    const noPhoto = await post({ barrio: "Palermo" });
+    expect(noPhoto.response.status).toBe(422); expect(noPhoto.data.error.code).toBe("PROOF_PHOTO_REQUIRED");
+    const noBarrio = await post({ fotoPrueba: proof.url });
+    expect(noBarrio.response.status).toBe(422); expect(noBarrio.data.error.code).toBe("BARRIO_REQUIRED");
+    const badBarrio = await post({ fotoPrueba: proof.url, barrio: "Narnia" });
+    expect(badBarrio.response.status).toBe(422); expect(badBarrio.data.error.code).toBe("INVALID_BARRIO");
+    const foreign = await post({ fotoPrueba: proof.url, barrio: "Palermo" }, 2);
+    expect(foreign.response.status).toBe(403); expect(foreign.data.error.code).toBe("PROOF_NOT_OWNED");
+    const publicImage = await uploadProof(1, "/uploads/images");
+    expect((await post({ fotoPrueba: publicImage.url, barrio: "Palermo" })).response.status).toBe(422);
+    expect((await post({ fotoPrueba: "https://externo.example/foto.png", barrio: "Palermo" })).response.status).toBe(422);
+    const ok = await post({ fotoPrueba: proof.filename, barrio: "palermo" });
+    expect(ok.response.status).toBe(201);
+    expect(ok.data.fotoPrueba).toBe(proof.url); expect(ok.data.barrio).toBe("Palermo");
+    const detail = (await api(`/reclamos/${ok.data.id}`, "GET", undefined, accounts[0]!.token)).data;
+    expect(detail.fotoPrueba).toBe(proof.url); expect(detail.barrio).toBe("Palermo");
+    const outsider = await api(`/publicaciones/${l.id}`, "GET", undefined, accounts[2]!.token);
+    expect(JSON.stringify(outsider.data)).not.toContain(proof.filename);
+  });
+  test("las pruebas privadas se sirven solo con sesión al autor y a participantes del reclamo", async () => {
+    const proof = await uploadProof(1);
+    const url = proof.url;
+    expect(url).toMatch(/^\/uploads\/pruebas\/[0-9a-f-]{36}\.png$/);
+    expect(readdirSync(join(temp, "uploads", "pruebas"))).toEqual([proof.filename]);
+    expect(readdirSync(join(temp, "uploads")).filter((n) => n.endsWith(".png"))).toHaveLength(0);
+    expect((await api(url)).response.status).toBe(401);
+    const own = await app.handle(new Request(`http://localhost${url}`, { headers: { Authorization: `Bearer ${accounts[1]!.token}` } }));
+    expect(own.status).toBe(200); expect(own.headers.get("cache-control")).toBe("private, no-store");
+    expect(Buffer.from(await own.arrayBuffer()).equals(PNG)).toBe(true);
+    // Sin reclamo que la referencie, ni el dueño de una publicación ni terceros la ven.
+    const l = await lost();
+    expect((await api(url, "GET", undefined, accounts[0]!.token)).response.status).toBe(403);
+    expect((await api(url, "GET", undefined, accounts[2]!.token)).response.status).toBe(403);
+    expect((await api(`/uploads/${proof.filename}`)).response.status).toBe(404);
+    expect((await api(`/uploads/pruebas/${crypto.randomUUID()}.png`, "GET", undefined, accounts[1]!.token)).response.status).toBe(404);
+    expect((await api("/uploads/pruebas/..%2Fx.png", "GET", undefined, accounts[1]!.token)).response.status).toBe(404);
+    const c = await api(`/publicaciones/${l.id}/reclamos`, "POST", { mensaje: "Las encontré yo.", fotoPrueba: url, barrio: "Palermo" }, accounts[1]!.token);
+    expect(c.response.status).toBe(201);
+    expect((await api(url, "GET", undefined, accounts[0]!.token)).response.status).toBe(200);
+    expect((await api(url, "GET", undefined, accounts[2]!.token)).response.status).toBe(403);
+    // Una prueba no puede publicarse como foto ni como avatar, y las imágenes públicas siguen igual.
+    expect((await api("/publicaciones", "POST", postBody({ fotos: [`/uploads/${proof.filename}`] }), accounts[1]!.token)).response.status).toBe(403);
+    expect((await api("/me", "PATCH", { avatarUrl: `/uploads/${proof.filename}` }, accounts[1]!.token)).response.status).toBe(403);
+    const image = await uploadProof(0, "/uploads/images");
+    const publicRes = await app.handle(new Request(`http://localhost${image.url}`));
+    expect(publicRes.status).toBe(200); expect(publicRes.headers.get("cache-control")).toContain("public");
+    const anonymous = new FormData(); anonymous.set("file", new File([PNG], "prueba.png", { type: "image/png" }));
+    expect((await api("/uploads/pruebas", "POST", anonymous)).response.status).toBe(401);
+  });
+  test("las publicaciones vencen a los 30 días, salen de búsquedas y alertas y se renuevan", async () => {
+    const p = await publish();
+    const days = (Date.parse(p.venceAt) - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(29.99); expect(days).toBeLessThanOrEqual(30);
+    expect(await search()).toEqual([p.id]);
+    const token = accounts[1]!.token;
+    const alert = await api("/alertas", "POST", { filtros: filters }, token);
+    await api(`/alertas/${alert.data.id}`, "PATCH", { activa: false }, token);
+    expire(p.id);
+    expect(await search()).toEqual([]); expect(await search(token)).toEqual([]);
+    expect((await api(`/publicaciones/${p.id}`)).data.estado).toBe("vencida");
+    const mine = async (estado: string) => (await api(`/mis-publicaciones?estado=${estado}`, "GET", undefined, accounts[0]!.token)).data.items.map((x: any) => x.id);
+    expect(await mine("vencida")).toEqual([p.id]); expect(await mine("abierta")).toEqual([]);
+    expect((await api("/mis-publicaciones?estado=inexistente", "GET", undefined, accounts[0]!.token)).response.status).toBe(422);
+    // Sin reclamos ni seguidores nuevos, y sin alertas aunque se reactive la alerta.
+    const refused = await api(`/publicaciones/${p.id}/reclamos`, "POST", { mensaje: "Son mis llaves.", respuestaVerificacion: ANSWER }, token);
+    expect(refused.response.status).toBe(409); expect(refused.data.error.code).toBe("PUBLICATION_EXPIRED");
+    expect((await api(`/publicaciones/${p.id}/seguir`, "POST", undefined, token)).data.error.code).toBe("PUBLICATION_EXPIRED");
+    db.update(posts).set({ updatedAt: nowIso() }).where(eq(posts.id, p.id)).run();
+    await api(`/alertas/${alert.data.id}`, "PATCH", { activa: true }, token);
+    expect((await api("/notificaciones", "GET", undefined, token)).data.total).toBe(0);
+    // Renovar: solo el dueño; vuelve a ser visible y dispara la alerta una sola vez.
+    expect((await api(`/publicaciones/${p.id}/renovar`, "POST", undefined, token)).response.status).toBe(403);
+    expect((await api(`/publicaciones/${p.id}/renovar`, "POST")).response.status).toBe(401);
+    const renewed = await api(`/publicaciones/${p.id}/renovar`, "POST", undefined, accounts[0]!.token);
+    expect(renewed.response.status).toBe(200); expect(renewed.data.estado).toBe("abierta");
+    expect(Date.parse(renewed.data.venceAt) - Date.now()).toBeGreaterThan(29.99 * 86_400_000);
+    expect(await search()).toEqual([p.id]);
+    expect((await api("/notificaciones", "GET", undefined, token)).data.total).toBe(1);
+    await api(`/publicaciones/${p.id}/renovar`, "POST", undefined, accounts[0]!.token);
+    expect((await api("/notificaciones", "GET", undefined, token)).data.total).toBe(1);
+    expect((await claim(p.id)).estado).toBe("pendiente");
+  });
+  test("una publicación con reclamo vigente o aceptado no vence; resuelta y eliminada no se renuevan", async () => {
+    const p = await publish();
+    const c = await claim(p.id);
+    expire(p.id);
+    expect((await api(`/publicaciones/${p.id}`)).data.estado).toBe("abierta");
+    // Al pasar las 48 h sin respuesta el reclamo vence y, con él, la publicación.
+    const old = new Date(Date.now() - 49 * 3_600_000).toISOString();
+    db.update(claims).set({ createdAt: old, updatedAt: old }).where(eq(claims.id, c.id)).run();
+    expect((await api(`/publicaciones/${p.id}`)).data.estado).toBe("vencida");
+    const second = await publish();
+    await accept(second.id);
+    expire(second.id);
+    expect((await api(`/publicaciones/${second.id}`)).data.estado).toBe("en_reclamo");
+    expect((await api(`/publicaciones/${second.id}/renovar`, "POST", undefined, accounts[0]!.token)).response.status).toBe(200);
+    expect((await api(`/publicaciones/${second.id}/resolver`, "POST", undefined, accounts[0]!.token)).response.status).toBe(200);
+    expire(second.id);
+    expect((await api(`/publicaciones/${second.id}`)).data.estado).toBe("resuelta");
+    expect((await api(`/publicaciones/${second.id}/renovar`, "POST", undefined, accounts[0]!.token)).response.status).toBe(409);
+    await api(`/publicaciones/${p.id}`, "DELETE", undefined, accounts[0]!.token);
+    expect((await api(`/publicaciones/${p.id}/renovar`, "POST", undefined, accounts[0]!.token)).response.status).toBe(404);
+  });
+  test("clientId hace idempotente el alta por usuario", async () => {
+    const clientId = crypto.randomUUID();
+    const first = await api("/publicaciones", "POST", postBody({ clientId }), accounts[0]!.token);
+    expect(first.response.status).toBe(201);
+    const [again, other] = await Promise.all([
+      api("/publicaciones", "POST", postBody({ clientId, titulo: "Otro título" }), accounts[0]!.token),
+      api("/publicaciones", "POST", postBody({ clientId }), accounts[0]!.token),
+    ]);
+    for (const r of [again, other]) { expect(r.response.status).toBe(200); expect(r.data.id).toBe(first.data.id); }
+    expect(again.data.titulo).toBe("Llaves con llavero azul");
+    expect(db.select().from(posts).all()).toHaveLength(1);
+    const otherUser = await api("/publicaciones", "POST", postBody({ clientId }), accounts[1]!.token);
+    expect(otherUser.response.status).toBe(201); expect(otherUser.data.id).not.toBe(first.data.id);
+    expect((await api("/publicaciones", "POST", postBody({ clientId: crypto.randomUUID() }), accounts[0]!.token)).response.status).toBe(201);
+    expect(db.select().from(posts).all()).toHaveLength(3);
+    expect((await api("/publicaciones", "POST", postBody({ clientId: "x" }), accounts[0]!.token)).response.status).toBe(422);
+    await api(`/publicaciones/${first.data.id}`, "DELETE", undefined, accounts[0]!.token);
+    const deleted = await api("/publicaciones", "POST", postBody({ clientId }), accounts[0]!.token);
+    expect(deleted.response.status).toBe(409); expect(deleted.data.error.code).toBe("CLIENT_ID_ALREADY_USED");
+  });
+  test("la migración conserva datos y da 30 días de vigencia a las publicaciones existentes", () => {
+    const folder = join(temp, "before-contract");
+    for (const name of readdirSync(new URL("../drizzle", import.meta.url))) {
+      if (name.startsWith("2026") && !name.endsWith("contrato_verificacion_vencimiento")) {
+        cpSync(new URL(`../drizzle/${name}`, import.meta.url), join(folder, name), { recursive: true });
+      }
+    }
+    const path = join(temp, "before-contract.sqlite");
+    const raw = new Database(path, { create: true });
+    migrate(drizzle({ client: raw }), { migrationsFolder: folder });
+    const old = new Date(Date.now() - 90 * 86_400_000).toISOString();
+    raw.run("INSERT INTO users (id,email,name,created_at,email_verified_at) VALUES ('o','o@example.com','Dueño',?,?)", [old, old]);
+    raw.run(`INSERT INTO hallado_publications (id,user_id,tipo,titulo,descripcion,categoria,barrio,fecha,franja,latitud,longitud,fotos,estado,created_at,updated_at)
+      VALUES ('old-post','o','encontrado','Llaves viejas','Llaves viejas de hace mucho','Llaves','Palermo','2026-07-01','tarde',-34.5,-58.4,'[]','abierta',?,?)`, [old, old]);
+    raw.run("INSERT INTO hallado_claims (id,publication_id,user_id,mensaje,estado,intentos,created_at,updated_at) VALUES ('old-claim','old-post','o','Mensaje viejo','rechazado',2,?,?)", [old, old]);
+    raw.run("INSERT INTO hallado_uploads (filename,user_id,content_type,created_at) VALUES ('f.png','o','image/png',?)", [old]);
+    raw.close();
+    const upgraded = createDatabase(path);
+    try {
+      const post = upgraded.select().from(posts).where(eq(posts.id, "old-post")).get()!;
+      expect(post.titulo).toBe("Llaves viejas"); expect(post.preguntaVerificacion).toBeNull(); expect(post.clientId).toBeNull();
+      expect(Date.parse(post.venceAt!) - Date.now()).toBeGreaterThan(29.9 * 86_400_000);
+      const claim = upgraded.select().from(claims).where(eq(claims.id, "old-claim")).get()!;
+      expect(claim.intentos).toBe(2); expect(claim.fotoPrueba).toBeNull();
+      expect(upgraded.$client.query("SELECT tipo FROM hallado_uploads WHERE filename = 'f.png'").get()).toEqual({ tipo: "imagen" });
+    } finally { upgraded.$client.close(); }
+  });
 });

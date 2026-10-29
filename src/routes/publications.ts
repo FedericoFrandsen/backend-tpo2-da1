@@ -4,9 +4,9 @@ import { optionalUser, requireUser } from "../auth";
 import type { AppDatabase } from "../database";
 import { claims, follows, halladoPublications as posts } from "../db/schema";
 import { ApiError } from "../errors";
-import { filtersFromQuery, getPost, matchesPost, notify, notifyFollowers, notifyMatches, ownerPost, preparePublication, rememberSearch, searchOrigin, serializePost } from "../queries";
+import { filtersFromQuery, getPost, isExpired, matchesLive, notify, notifyFollowers, notifyMatches, ownerPost, postEstado, preparePublication, rememberSearch, searchOrigin, serializePost } from "../queries";
 import { CATEGORIES, publicationBody, ZONES } from "../types";
-import { distanceKm, nowIso, paginate } from "../utils";
+import { distanceKm, nowIso, paginate, publicationExpiry } from "../utils";
 
 export function publicationRoutes(db: AppDatabase) {
   return new Elysia()
@@ -22,7 +22,7 @@ export function publicationRoutes(db: AppDatabase) {
       if (!["recientes", "cercanos"].includes(orden)) throw new ApiError(422, "INVALID_SORT", "Orden inválido");
       if (orden === "cercanos" && !origin) throw new ApiError(422, "LOCATION_REQUIRED", "Para ordenar por cercanía enviá coordenadas o elegí un barrio de la lista");
       const items = db.select().from(posts).where(and(eq(posts.estado, "abierta"), isNull(posts.deletedAt))).all()
-        .filter((p) => matchesPost(p, filters))
+        .filter((p) => matchesLive(db, p, filters))
         .map((p) => ({ p, km: origin ? distanceKm(origin, p) : null }))
         .sort((a, b) => (orden === "cercanos" ? (a.km! - b.km!) : 0)
           || b.p.fecha.localeCompare(a.p.fecha) || b.p.createdAt.localeCompare(a.p.createdAt) || a.p.id.localeCompare(b.p.id));
@@ -38,23 +38,31 @@ export function publicationRoutes(db: AppDatabase) {
     })
     .get("/mis-publicaciones", async ({ headers, query }) => {
       const user = await requireUser(db, headers);
-      if (query.estado && !["abierta", "en_reclamo", "resuelta"].includes(query.estado)) throw new ApiError(422, "INVALID_STATUS", "Estado inválido");
+      if (query.estado && !["abierta", "en_reclamo", "resuelta", "vencida"].includes(query.estado)) throw new ApiError(422, "INVALID_STATUS", "Estado inválido");
       const items = db.select().from(posts).where(and(eq(posts.userId, user.id), isNull(posts.deletedAt)))
         .orderBy(desc(posts.createdAt), desc(posts.id)).all()
-        .filter((p) => !query.estado || p.estado === query.estado);
+        .filter((p) => !query.estado || postEstado(db, p) === query.estado);
       const page = paginate(items, query);
       return { ...page, items: page.items.map((p) => serializePost(db, p, user.id, true)) };
     })
     .post("/publicaciones", async ({ headers, body, set }) => {
       const user = await requireUser(db, headers);
-      const data = preparePublication(db, user.id, body);
-      const now = nowIso();
-      const id = crypto.randomUUID();
-      db.transaction((tx) => {
-        tx.insert(posts).values({ id, userId: user.id, ...data, createdAt: now, updatedAt: now }).run();
+      const { id, created } = db.transaction((tx) => {
+        // Idempotencia del alta: el mismo clientId del mismo usuario devuelve la publicación ya creada.
+        const previous = body.clientId ? tx.select().from(posts)
+          .where(and(eq(posts.userId, user.id), eq(posts.clientId, body.clientId))).get() : undefined;
+        if (previous) {
+          if (previous.deletedAt) throw new ApiError(409, "CLIENT_ID_ALREADY_USED", "Esa publicación ya fue creada y luego eliminada");
+          return { id: previous.id, created: false };
+        }
+        const data = preparePublication(tx, user.id, body);
+        const now = nowIso();
+        const id = crypto.randomUUID();
+        tx.insert(posts).values({ id, userId: user.id, ...data, clientId: body.clientId ?? null, venceAt: publicationExpiry(), createdAt: now, updatedAt: now }).run();
         notifyMatches(tx, getPost(tx, id));
+        return { id, created: true };
       });
-      set.status = 201;
+      set.status = created ? 201 : 200;
       return serializePost(db, getPost(db, id), user.id, true);
     }, { body: publicationBody })
     .patch("/publicaciones/:id", async ({ params, headers, body }) => {
@@ -63,9 +71,9 @@ export function publicationRoutes(db: AppDatabase) {
         const p = ownerPost(tx, params.id, user.id);
         if (p.estado !== "abierta") throw new ApiError(409, "PUBLICATION_LOCKED", "Solo podés editar una publicación abierta");
         const next = preparePublication(tx, user.id, {
-          ...p, ubicacion: { latitud: p.latitud, longitud: p.longitud }, ...body,
+          ...p, clientId: undefined, ubicacion: { latitud: p.latitud, longitud: p.longitud }, ...body,
           ...(body.barrio !== undefined && body.barrio !== p.barrio && body.ubicacion === undefined ? { ubicacion: null } : {}),
-        });
+        }, !(p.tipo === "encontrado" && !p.preguntaVerificacion));
         tx.update(posts).set({ ...next, updatedAt: nowIso() }).where(eq(posts.id, p.id)).run();
         const updated = getPost(tx, p.id);
         notifyFollowers(tx, updated, `Se actualizó: ${updated.titulo}`);
@@ -73,6 +81,17 @@ export function publicationRoutes(db: AppDatabase) {
       });
       return serializePost(db, getPost(db, params.id), user.id, true);
     }, { body: t.Partial(publicationBody) })
+    .post("/publicaciones/:id/renovar", async ({ params, headers }) => {
+      const user = await requireUser(db, headers);
+      db.transaction((tx) => {
+        const p = ownerPost(tx, params.id, user.id);
+        if (p.estado === "resuelta") throw new ApiError(409, "PUBLICATION_LOCKED", "No podés renovar una publicación resuelta");
+        tx.update(posts).set({ venceAt: publicationExpiry(), updatedAt: nowIso() }).where(eq(posts.id, p.id)).run();
+        // Si estaba vencida vuelve a ser visible: se avisa a las alertas que coinciden (deduplicadas).
+        notifyMatches(tx, getPost(tx, p.id));
+      });
+      return serializePost(db, getPost(db, params.id), user.id, true);
+    })
     .delete("/publicaciones/:id", async ({ params, headers }) => {
       const user = await requireUser(db, headers);
       db.transaction((tx) => {
@@ -92,6 +111,7 @@ export function publicationRoutes(db: AppDatabase) {
       const user = await requireUser(db, headers);
       const p = getPost(db, params.id);
       if (p.userId === user.id) throw new ApiError(409, "OWN_PUBLICATION", "Ya recibís las novedades de tus publicaciones");
+      if (isExpired(db, p)) throw new ApiError(409, "PUBLICATION_EXPIRED", "La publicación venció");
       db.insert(follows).values({ userId: user.id, publicationId: p.id, createdAt: nowIso() }).onConflictDoNothing().run();
       return { siguiendo: true };
     })

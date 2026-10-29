@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { check, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { users } from "./legacy";
 import { CATEGORIES } from "../types";
+import { publicationExpiry } from "../utils";
 export * from "./legacy";
 
 export const halladoPublications = sqliteTable("hallado_publications", {
@@ -19,6 +20,11 @@ export const halladoPublications = sqliteTable("hallado_publications", {
   direccionExacta: text("direccion_exacta"),
   fotos: text("fotos", { mode: "json" }).$type<string[]>().notNull().default([]),
   estado: text("estado", { enum: ["abierta", "en_reclamo", "resuelta"] }).notNull().default("abierta"),
+  preguntaVerificacion: text("pregunta_verificacion"),
+  respuestaVerificacion: text("respuesta_verificacion"),
+  clientId: text("client_id"),
+  // Nullable solo porque SQLite no agrega columnas NOT NULL sin default constante; la migración rellena las filas previas.
+  venceAt: text("vence_at").$defaultFn(() => publicationExpiry()),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   resolvedAt: text("resolved_at"),
@@ -29,6 +35,7 @@ export const halladoPublications = sqliteTable("hallado_publications", {
   check("hallado_franja_check", sql`${t.franja} IN ('manana','tarde','noche')`),
   index("hallado_busqueda_idx").on(t.tipo, t.categoria, t.fecha),
   index("hallado_propias_idx").on(t.userId, t.createdAt),
+  uniqueIndex("hallado_client_id_unique").on(t.userId, t.clientId),
 ]);
 
 export const claims = sqliteTable("hallado_claims", {
@@ -36,6 +43,9 @@ export const claims = sqliteTable("hallado_claims", {
   publicationId: text("publication_id").notNull().references(() => halladoPublications.id),
   userId: text("user_id").notNull().references(() => users.id),
   mensaje: text("mensaje").notNull(),
+  respuestaVerificacion: text("respuesta_verificacion"),
+  fotoPrueba: text("foto_prueba"),
+  barrio: text("barrio"),
   estado: text("estado", { enum: ["pendiente", "aceptado", "rechazado", "cancelado", "vencido"] }).notNull().default("pendiente"),
   intentos: integer("intentos").notNull().default(1),
   createdAt: text("created_at").notNull(),
@@ -132,6 +142,8 @@ export const uploads = sqliteTable("hallado_uploads", {
   filename: text("filename").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id),
   contentType: text("content_type").notNull(),
+  // "imagen" = pública (/uploads/:filename); "prueba" = foto de comprobación privada (/uploads/pruebas/:filename).
+  tipo: text("tipo", { enum: ["imagen", "prueba"] }).notNull().default("imagen"),
   createdAt: text("created_at").notNull(),
 });
 

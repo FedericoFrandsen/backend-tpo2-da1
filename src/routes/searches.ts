@@ -4,7 +4,7 @@ import { requireUser } from "../auth";
 import type { AppDatabase } from "../database";
 import { alerts, halladoPublications as posts, notifications, searchHistory } from "../db/schema";
 import { ApiError } from "../errors";
-import { matchesPost, normalizeFilters, notify, rememberSearch, searchKey } from "../queries";
+import { matchesLive, normalizeFilters, notify, rememberSearch, searchKey } from "../queries";
 import { filtersSchema } from "../types";
 import { nowIso, paginate } from "../utils";
 
@@ -55,7 +55,7 @@ export function searchRoutes(db: AppDatabase) {
         tx.update(alerts).set({ activa: body.activa }).where(eq(alerts.id, a.id)).run();
         if (body.activa && !a.activa) {
           for (const p of tx.select().from(posts).where(isNull(posts.deletedAt)).all()) {
-            if (p.userId !== user.id && p.updatedAt >= a.createdAt && matchesPost(p, a.filtros)) {
+            if (p.userId !== user.id && p.updatedAt >= a.createdAt && matchesLive(tx, p, a.filtros)) {
               notify(tx, user.id, "coincidencia", `Hay una coincidencia: ${p.titulo}`, {
                 publicationId: p.id, alertId: a.id, dedupeKey: `alert:${a.id}:${p.id}`,
               });

@@ -27,7 +27,7 @@ export function userRoutes(db: AppDatabase) {
         if (!/^\/uploads\/[0-9a-f-]{36}\.(jpg|png|webp)$/.test(body.avatarUrl)) {
           throw new ApiError(422, "INVALID_AVATAR", "Primero subí la foto a /uploads/images");
         }
-        const image = db.select().from(uploads).where(and(eq(uploads.filename, body.avatarUrl.slice(9)), eq(uploads.userId, user.id))).get();
+        const image = db.select().from(uploads).where(and(eq(uploads.filename, body.avatarUrl.slice(9)), eq(uploads.userId, user.id), eq(uploads.tipo, "imagen"))).get();
         if (!image) throw new ApiError(403, "IMAGE_NOT_OWNED", "La foto no pertenece a tu cuenta");
       }
       const changes = {

@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import type { Store } from "./database";
 import { alerts, claims, follows, halladoPublications as posts, halladoReviews, notifications, searchHistory, uploads, users } from "./db/schema";
 import { ApiError } from "./errors";
@@ -27,6 +27,18 @@ export function expirePendingClaims(db: Store): void {
     .where(and(eq(claims.estado, "pendiente"), sql`${claims.updatedAt} <= ${cutoff}`))
     .run();
 }
+
+/**
+ * Una publicación abierta cuyo `venceAt` pasó se expone como "vencida" (estado derivado, no se guarda).
+ * Mientras tenga un reclamo pendiente vigente (48 h) todavía no vence; una `en_reclamo` (reclamo aceptado) tampoco.
+ */
+export function isExpired(db: Store, p: Post): boolean {
+  if (p.estado !== "abierta" || !p.venceAt || p.venceAt > nowIso()) return false;
+  const cutoff = new Date(Date.now() - CLAIM_EXPIRATION_MS).toISOString();
+  return !db.select({ id: claims.id }).from(claims)
+    .where(and(eq(claims.publicationId, p.id), eq(claims.estado, "pendiente"), gt(claims.updatedAt, cutoff))).get();
+}
+export const postEstado = (db: Store, p: Post) => (isExpired(db, p) ? "vencida" as const : p.estado);
 
 export function getPost(db: Store, id: string) {
   const post = db.select().from(posts).where(and(eq(posts.id, id), isNull(posts.deletedAt))).get();
@@ -88,9 +100,12 @@ export function serializePost(db: Store, p: Post, viewerId?: string, detail = fa
   return {
     id: p.id, tipo: p.tipo, titulo: p.titulo, descripcion: p.descripcion,
     categoria: p.categoria, barrio: p.barrio, fecha: p.fecha, franja: p.franja,
-    estado: p.estado, latitud, longitud, ubicacion: { latitud, longitud }, fotos: p.fotos,
-    creadaEn: p.createdAt, actualizadaEn: p.updatedAt, resueltaEn: p.resolvedAt,
+    estado: postEstado(db, p), latitud, longitud, ubicacion: { latitud, longitud }, fotos: p.fotos,
+    creadaEn: p.createdAt, actualizadaEn: p.updatedAt, resueltaEn: p.resolvedAt, venceAt: p.venceAt || null,
     ...(detail ? {
+      preguntaVerificacion: p.preguntaVerificacion,
+      // La respuesta privada solo la ve quien publicó el hallazgo.
+      ...(own ? { respuestaVerificacion: p.respuestaVerificacion } : {}),
       direccionExacta: privileged ? p.direccionExacta : null,
       publicador: { ...publisher, ...(participant && accepted && source.sharePhone ? { phone: source.phone } : {}) },
       esPropia: own, siguiendo,
@@ -100,6 +115,7 @@ export function serializePost(db: Store, p: Post, viewerId?: string, detail = fa
         id: mine.id,
         estado: mineEstado,
         mensaje: mine.mensaje,
+        respuestaVerificacion: mine.respuestaVerificacion, fotoPrueba: mine.fotoPrueba, barrio: mine.barrio,
         intentos: mine.intentos ?? 1,
         maxIntentos: 3,
       } : null,
@@ -111,9 +127,12 @@ export function serializePost(db: Store, p: Post, viewerId?: string, detail = fa
 export function serializeClaim(db: Store, claim: Claim, post: Post, viewerId: string) {
   const u = db.select().from(users).where(eq(users.id, claim.userId)).get()!;
   const estado = isClaimExpired(claim) ? "vencido" : claim.estado;
+  // Las pruebas del reclamo son privadas: solo el reclamante y el dueño de la publicación.
+  const participant = viewerId === claim.userId || viewerId === post.userId;
   return {
     id: claim.id, publicacionId: claim.publicationId, usuarioId: u.id, usuario: u.name,
     perfil: publicProfile(db, u.id), mensaje: claim.mensaje, estado,
+    ...(participant ? { respuestaVerificacion: claim.respuestaVerificacion, fotoPrueba: claim.fotoPrueba, barrio: claim.barrio } : {}),
     intentos: claim.intentos ?? 1,
     maxIntentos: 3,
     permiteTelefono: u.sharePhone,
@@ -178,6 +197,8 @@ export function matchesPost(p: Post, f: SearchFilters) {
     && words.every((w) => text.includes(w))
     && (!f.ubicacion || distanceKm(f.ubicacion, p) <= (f.radioKm ?? config.searchRadiusKm));
 }
+/** Coincide con los filtros y sigue vigente: las vencidas no aparecen en búsquedas ni disparan alertas. */
+export const matchesLive = (db: Store, p: Post, f: SearchFilters) => matchesPost(p, f) && !isExpired(db, p);
 export function searchKey(f: SearchFilters) {
   return JSON.stringify({ ...f, palabras: normalizeText(f.palabras ?? ""), zona: normalizeText(f.zona ?? "") });
 }
@@ -189,7 +210,23 @@ export function rememberSearch(db: Store, userId: string, filtros: SearchFilters
     .orderBy(desc(searchHistory.createdAt), desc(searchHistory.id)).all();
   for (const row of rows.slice(5)) db.delete(searchHistory).where(eq(searchHistory.id, row.id)).run();
 }
-export function preparePublication(db: Store, userId: string, input: PublicationBody) {
+const IMAGE_URL = /^\/uploads\/[0-9a-f-]{36}\.(jpg|png|webp)$/;
+const PROOF_URL = /^(?:\/uploads\/pruebas\/)?([0-9a-f-]{36}\.(?:jpg|png|webp))$/;
+
+/** Valida una foto de comprobación subida por el mismo usuario a /uploads/pruebas y devuelve su URL canónica. */
+export function ownedProof(db: Store, userId: string, value: string) {
+  const filename = PROOF_URL.exec(value.trim())?.[1];
+  if (!filename) throw new ApiError(422, "INVALID_PROOF", "Primero subí la foto de comprobación a /uploads/pruebas");
+  const proof = db.select().from(uploads).where(and(eq(uploads.filename, filename), eq(uploads.tipo, "prueba"))).get();
+  if (!proof || proof.userId !== userId) throw new ApiError(403, "PROOF_NOT_OWNED", "La foto de comprobación no pertenece a tu cuenta");
+  return `/uploads/pruebas/${filename}`;
+}
+export function zoneName(value: string) {
+  return ZONES.find((z) => normalizeText(z.nombre) === normalizeText(value))?.nombre;
+}
+
+/** `requireVerification`: al crear un hallazgo la pregunta y la respuesta son obligatorias (al editar, salvo hallazgos previos sin pregunta). */
+export function preparePublication(db: Store, userId: string, input: PublicationBody, requireVerification = true) {
   const titulo = cleanText(input.titulo, 3, "título");
   const descripcion = cleanText(input.descripcion, 10, "descripción");
   requireDate(input.fecha);
@@ -198,17 +235,31 @@ export function preparePublication(db: Store, userId: string, input: Publication
   if (!coord) throw new ApiError(422, "LOCATION_REQUIRED", "Elegí un barrio de la lista o enviá las coordenadas");
   const fotos = input.fotos ?? [];
   for (const url of fotos) {
-    if (!/^\/uploads\/[0-9a-f-]{36}\.(jpg|png|webp)$/.test(url)) {
+    if (!IMAGE_URL.test(url)) {
       throw new ApiError(422, "INVALID_IMAGE", "Primero subí las fotos a /uploads/images");
     }
-    const image = db.select().from(uploads).where(eq(uploads.filename, url.slice("/uploads/".length))).get();
+    const image = db.select().from(uploads).where(and(eq(uploads.filename, url.slice("/uploads/".length)), eq(uploads.tipo, "imagen"))).get();
     if (!image || image.userId !== userId) throw new ApiError(403, "IMAGE_NOT_OWNED", "La foto no pertenece a tu cuenta");
   }
+  const tipo = input.tipo === "perdi" || input.tipo === "perdido" ? "perdido" as const : "encontrado" as const;
+  let preguntaVerificacion: string | null = null;
+  let respuestaVerificacion: string | null = null;
+  if (tipo === "encontrado") {
+    const pregunta = (input.preguntaVerificacion ?? "").trim();
+    const respuesta = (input.respuestaVerificacion ?? "").trim();
+    if (requireVerification || pregunta || respuesta) {
+      if (pregunta.length < 3) throw new ApiError(422, "VERIFICATION_QUESTION_REQUIRED", "Cargá una pregunta de verificación para quien diga que es el dueño");
+      if (!respuesta) throw new ApiError(422, "VERIFICATION_ANSWER_REQUIRED", "Cargá la respuesta a la pregunta de verificación");
+    }
+    preguntaVerificacion = pregunta || null;
+    respuestaVerificacion = respuesta || null;
+  }
   return {
-    tipo: input.tipo === "perdi" || input.tipo === "perdido" ? "perdido" as const : "encontrado" as const,
+    tipo,
     titulo, descripcion, categoria: input.categoria, barrio: barrio || "Ubicación actual",
     fecha: input.fecha, franja: input.franja, latitud: coord.latitud, longitud: coord.longitud,
     direccionExacta: input.direccionExacta?.trim() || null, fotos,
+    preguntaVerificacion, respuestaVerificacion,
   };
 }
 export function notify(db: Store, userId: string, tipo: string, mensaje: string,
@@ -223,7 +274,7 @@ export function notifyFollowers(db: Store, post: Post, mensaje: string) {
 }
 export function notifyMatches(db: Store, post: Post) {
   for (const a of db.select().from(alerts).where(eq(alerts.activa, true)).all()) {
-    if (a.userId !== post.userId && matchesPost(post, a.filtros)) {
+    if (a.userId !== post.userId && matchesLive(db, post, a.filtros)) {
       notify(db, a.userId, "coincidencia", `Hay una coincidencia: ${post.titulo}`, {
         publicationId: post.id, alertId: a.id, dedupeKey: `alert:${a.id}:${post.id}`,
       });

@@ -4,7 +4,8 @@ import { requireUser } from "../auth";
 import type { AppDatabase, Store } from "../database";
 import { claims, halladoPublications as posts, halladoReviews, messages } from "../db/schema";
 import { ApiError } from "../errors";
-import { acceptedClaim, expirePendingClaims, getClaim, getPost, isClaimExpired, notify, notifyFollowers, notifyMatches, ownerPost, publicProfile, serializeClaim, serializePost } from "../queries";
+import { acceptedClaim, expirePendingClaims, getClaim, getPost, isClaimExpired, isExpired, notify, notifyFollowers, notifyMatches, ownedProof, ownerPost, publicProfile, serializeClaim, serializePost, zoneName } from "../queries";
+import { claimBody } from "../types";
 import { cleanText, nowIso, paginate, reviewDeadline } from "../utils";
 
 function conversation(db: Store, claimId: string, userId: string) {
@@ -24,6 +25,7 @@ export function interactionRoutes(db: AppDatabase) {
         expirePendingClaims(tx);
         const p = getPost(tx, params.id);
         if (p.userId === user.id) throw new ApiError(409, "OWN_PUBLICATION", "No podés reclamar tu propia publicación");
+        if (isExpired(tx, p)) throw new ApiError(409, "PUBLICATION_EXPIRED", "La publicación venció y ya no acepta reclamos");
         if (p.estado !== "abierta") throw new ApiError(409, "PUBLICATION_NOT_OPEN", "La publicación no está abierta");
         const previous = tx.select().from(claims).where(and(eq(claims.publicationId, p.id), eq(claims.userId, user.id))).get();
         if (previous && ["pendiente", "aceptado"].includes(previous.estado) && !isClaimExpired(previous)) {
@@ -33,13 +35,27 @@ export function interactionRoutes(db: AppDatabase) {
         if (intentosPrevios >= 3) {
           throw new ApiError(409, "MAX_ATTEMPTS_EXCEEDED", "Alcanzaste el límite de 3 intentos de reclamo para esta publicación");
         }
+        // «Es mío» (sobre un hallazgo) responde la pregunta del publicador; «Lo encontré» (sobre algo perdido) exige foto y barrio.
+        const respuesta = (body.respuestaVerificacion ?? "").trim();
+        const barrioIngresado = (body.barrio ?? "").trim();
+        if (p.tipo === "encontrado" && p.preguntaVerificacion && !respuesta) {
+          throw new ApiError(422, "VERIFICATION_ANSWER_REQUIRED", "Respondé la pregunta de verificación del publicador");
+        }
+        if (p.tipo === "perdido" && !body.fotoPrueba?.trim()) {
+          throw new ApiError(422, "PROOF_PHOTO_REQUIRED", "Adjuntá una foto que pruebe que lo encontraste");
+        }
+        if (p.tipo === "perdido" && !barrioIngresado) throw new ApiError(422, "BARRIO_REQUIRED", "Indicá el barrio donde lo encontraste");
+        const barrio = barrioIngresado ? zoneName(barrioIngresado) : null;
+        if (barrioIngresado && !barrio) throw new ApiError(422, "INVALID_BARRIO", "Elegí un barrio de la lista");
+        const fotoPrueba = body.fotoPrueba?.trim() ? ownedProof(tx, user.id, body.fotoPrueba) : null;
+        const evidencia = { respuestaVerificacion: p.tipo === "encontrado" ? respuesta || null : null, fotoPrueba, barrio: barrio ?? null };
         const now = nowIso();
         const id = previous?.id ?? crypto.randomUUID();
         const nuevosIntentos = intentosPrevios + 1;
         if (previous) {
-          tx.update(claims).set({ mensaje, estado: "pendiente", intentos: nuevosIntentos, createdAt: now, updatedAt: now }).where(eq(claims.id, id)).run();
+          tx.update(claims).set({ mensaje, ...evidencia, estado: "pendiente", intentos: nuevosIntentos, createdAt: now, updatedAt: now }).where(eq(claims.id, id)).run();
         } else {
-          tx.insert(claims).values({ id, publicationId: p.id, userId: user.id, mensaje, estado: "pendiente", intentos: 1, createdAt: now, updatedAt: now }).run();
+          tx.insert(claims).values({ id, publicationId: p.id, userId: user.id, mensaje, ...evidencia, estado: "pendiente", intentos: 1, createdAt: now, updatedAt: now }).run();
         }
         notify(tx, p.userId, "reclamo", `Recibiste un reclamo en ${p.titulo}`, { publicationId: p.id, claimId: id });
         return id;
@@ -47,7 +63,7 @@ export function interactionRoutes(db: AppDatabase) {
       set.status = 201;
       const c = getClaim(db, id);
       return serializeClaim(db, c, getPost(db, c.publicationId), user.id);
-    }, { body: t.Object({ mensaje: t.String({ minLength: 5, maxLength: 1000 }) }) })
+    }, { body: claimBody })
     .get("/publicaciones/:id/reclamos", async ({ headers, params, query }) => {
       const user = await requireUser(db, headers);
       const p = ownerPost(db, params.id, user.id);

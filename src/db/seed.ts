@@ -37,6 +37,7 @@ try {
               titulo: titles[ci]!, descripcion: `${titles[ci]}. Publicación de demostración para probar Hallado.`,
               categoria, barrio: z.nombre, fecha: date.toISOString().slice(0, 10), franja: "tarde",
               latitud: z.latitud + day * 0.001, longitud: z.longitud, direccionExacta: "Dirección ficticia 123", fotos: [],
+              ...(tipo === "encontrado" ? { preguntaVerificacion: "¿Qué detalle distintivo tiene?", respuestaVerificacion: "Una marca azul" } : {}),
               createdAt: now, updatedAt: now,
             }).onConflictDoNothing().run();
           }
@@ -51,6 +52,7 @@ try {
         descripcion: "Objeto devuelto a su dueño en los datos de demostración.", categoria: "Otros", barrio: "Palermo",
         fecha: localDate(), franja: "manana", latitud: ZONES[1]!.latitud, longitud: ZONES[1]!.longitud,
         estado: "resuelta", resolvedAt: now, createdAt: now, updatedAt: now,
+        preguntaVerificacion: "¿De qué color es?", respuestaVerificacion: "Negro",
       }).onConflictDoNothing().run();
       tx.insert(claims).values({ id: claimId, publicationId: id, userId: ids[1]!, mensaje: "Es mío, coordinamos la devolución.", estado: "aceptado", createdAt: now, updatedAt: now }).onConflictDoNothing().run();
       tx.insert(halladoReviews).values({ id: `demo-valoracion-${i}`, publicationId: id, reviewerId: ids[1]!, reviewedUserId: ids[0]!, positiva: true, comentario: "Gracias por devolverlo.", createdAt: now }).onConflictDoNothing().run();
