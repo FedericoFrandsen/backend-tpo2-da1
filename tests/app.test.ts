@@ -952,3 +952,144 @@ describe("verificación del publicador, pruebas privadas, vencimiento e idempote
     } finally { upgraded.$client.close(); }
   });
 });
+
+describe("búsqueda: contrato de resultados", () => {
+  const ANSWER = "Una estrella azul";
+  const QUESTION = "¿Qué dibujo tiene el llavero?";
+  const dayAgo = (n: number) => localDate(new Date(Date.now() - n * 86_400_000));
+  let seq = 0;
+  /** Inserta directo en la base para controlar fecha, orden de alta y vencimiento. */
+  function seed(extra: Partial<typeof posts.$inferInsert> = {}) {
+    const id = extra.id ?? crypto.randomUUID();
+    const at = new Date(Date.UTC(2026, 0, 1) + seq++ * 1000).toISOString();
+    db.insert(posts).values({ userId: accounts[0]!.id, tipo: "encontrado", titulo: "Llaves con llavero azul", descripcion: "Juego de tres llaves con un llavero de color azul.",
+      categoria: "Llaves", barrio: "Palermo", fecha: localDate(), franja: "tarde", latitud: -34.5889, longitud: -58.4306, direccionExacta: "Calle privada 123",
+      fotos: [], preguntaVerificacion: QUESTION, respuestaVerificacion: ANSWER, createdAt: at, updatedAt: at, ...extra, id }).run();
+    return id;
+  }
+  const ids = async (extra: Record<string, string> = {}, token?: string) => (await api(query(extra), "GET", undefined, token)).data.items.map((x: any) => x.id);
+  const expire = (id: string) => db.update(posts).set({ venceAt: new Date(Date.now() - 86_400_000).toISOString() }).where(eq(posts.id, id)).run();
+
+  test("combina tipo, categoría, barrio, fechas, palabras, estado y eliminadas", async () => {
+    const hit = seed({ titulo: "Llaves azules", fecha: dayAgo(2) });
+    const accent = seed({ barrio: "Ubicación actual", titulo: "Llaves azules ubicación", fecha: dayAgo(1) });
+    const old = seed({ fecha: dayAgo(8) });
+    seed({ tipo: "perdido" });
+    seed({ categoria: "Otros" });
+    seed({ barrio: "Belgrano" });
+    seed({ estado: "en_reclamo" });
+    seed({ estado: "resuelta" });
+    seed({ deletedAt: nowIso() });
+    expect(await ids({ periodo: "semana" })).toEqual([hit]);
+    expect(await ids({ zona: "UBICACION actual" })).toEqual([accent]);
+    expect(await ids({ periodo: "hoy" })).toEqual([]);
+    expect(await ids({ palabras: "AZULES llaves" })).toEqual([hit]);
+    expect(await ids({ palabras: "azules ubicacion", zona: "ubicación ACTUAL" })).toEqual([accent]);
+    expect(await ids({ palabras: "no-existe" })).toEqual([]);
+    // El rango es inclusivo en ambos extremos.
+    expect(await ids({ periodo: "rango", desde: dayAgo(2), hasta: dayAgo(2) })).toEqual([hit]);
+    expect(await ids({ periodo: "rango", desde: dayAgo(3), hasta: dayAgo(1) })).toEqual([hit]);
+    expect(await ids({ periodo: "rango", desde: dayAgo(9), hasta: dayAgo(7) })).toEqual([old]);
+    // Con situación «encontré» se buscan los perdidos.
+    expect(await ids({ situacion: "encontre" })).toHaveLength(1);
+  });
+
+  test("ordena por fecha, alta e id; el resumen incluye la distancia y no depende de quién consulta", async () => {
+    const a = seed({ fecha: dayAgo(1) });
+    const b = seed({ fecha: dayAgo(0) });
+    const c = seed({ fecha: dayAgo(0) });
+    const at = db.select().from(posts).where(eq(posts.id, c)).get()!.createdAt;
+    const d = seed({ fecha: dayAgo(0), id: "00000000-0000-4000-8000-000000000000", createdAt: at, updatedAt: at });
+    // Más reciente primero; a igual fecha y alta (c y d) gana el id menor.
+    expect(await ids()).toEqual([d, c, b, a]);
+    expect(await ids({}, accounts[1]!.token)).toEqual([d, c, b, a]);
+    expect((await api(query())).data.items.every((x: any) => x.distancia === 0)).toBe(true);
+  });
+
+  test("cercanos ordena por distancia y desempata por fecha; el radio GPS recorta", async () => {
+    const far = seed({ latitud: -34.60, longitud: -58.43, fecha: dayAgo(0) });
+    const mid = seed({ latitud: -34.5895, longitud: -58.4306, fecha: dayAgo(1) });
+    const nearOld = seed({ fecha: dayAgo(2) });
+    const nearNew = seed({ fecha: dayAgo(0) });
+    const result = await api(query({ orden: "cercanos" }));
+    expect(result.data.items.map((x: any) => x.id)).toEqual([nearNew, nearOld, mid, far]);
+    expect(result.data.items.map((x: any) => x.distancia)).toEqual([0, 0, 0.1, 1.2]);
+    const gps = { zona: "", latitud: "-34.5889", longitud: "-58.4306" };
+    const near = await api(query({ ...gps, radioKm: "0.5", orden: "cercanos" }));
+    expect(near.data.items.map((x: any) => x.id)).toEqual([nearNew, nearOld, mid]); expect(near.data.total).toBe(3);
+    const recent = await api(query({ ...gps, radioKm: "5" }));
+    expect(recent.data.items.map((x: any) => x.id)).toEqual([nearNew, far, mid, nearOld]);
+    // GPS más barrio: se exigen ambos.
+    expect((await api(query({ latitud: "-34.6037", longitud: "-58.3816", radioKm: "1" }))).data.total).toBe(0);
+  });
+
+  test("pagina con total y totalPages correctos en recientes, cercanos, con palabras y con GPS", async () => {
+    for (let i = 0; i < 45; i++) seed({ fecha: dayAgo(i % 5), titulo: `Llaves número ${i}`, latitud: -34.5889 + i * 0.0001 });
+    seed({ deletedAt: nowIso() });
+    for (const extra of [{} as Record<string, string>, { orden: "cercanos" }, { palabras: "llaves" }, { zona: "", latitud: "-34.5889", longitud: "-58.4306" }]) {
+      const seen: string[] = [];
+      for (const page of [1, 2, 3]) {
+        const r = (await api(query({ ...extra, page: String(page) }))).data;
+        expect(r.total).toBe(45); expect(r.totalPages).toBe(3); expect(r.page).toBe(page); expect(r.pageSize).toBe(20);
+        expect(r.items).toHaveLength(page === 3 ? 5 : 20);
+        seen.push(...r.items.map((x: any) => x.id));
+      }
+      expect(new Set(seen).size).toBe(45);
+      const beyond = (await api(query({ ...extra, page: "4" }))).data;
+      expect(beyond.items).toEqual([]); expect(beyond.total).toBe(45); expect(beyond.totalPages).toBe(3);
+      const small = (await api(query({ ...extra, pageSize: "7", page: "7" }))).data;
+      expect(small.items).toHaveLength(3); expect(small.totalPages).toBe(7);
+    }
+    const dates = (await api(query({ pageSize: "100" }))).data.items.map((x: any) => x.fecha);
+    expect(dates).toEqual([...dates].sort().reverse());
+    expect(Object.keys((await api(query())).data)).toEqual(["items", "page", "pageSize", "total", "totalPages"]);
+  });
+
+  test("las vencidas no cuentan ni aparecen, salvo con reclamo pendiente vigente", async () => {
+    const live = seed();
+    const gone = seed(); expire(gone);
+    const legacy = seed({ venceAt: null });
+    const stale = seed(); expire(stale);
+    const pending = seed(); expire(pending);
+    const expiredLost = seed({ tipo: "perdido" }); expire(expiredLost);
+    const fresh = new Date().toISOString(), old = new Date(Date.now() - 49 * 3_600_000).toISOString();
+    const row = (publicationId: string, at: string, estado: "pendiente" | "rechazado" = "pendiente") =>
+      db.insert(claims).values({ id: crypto.randomUUID(), publicationId, userId: accounts[1]!.id, mensaje: "Son mis llaves.", estado, createdAt: at, updatedAt: at }).run();
+    row(pending, fresh);
+    row(stale, old);
+    // Un reclamo rechazado no sostiene la publicación.
+    row(gone, fresh, "rechazado");
+    const result = (await api(query())).data;
+    expect(result.items.map((x: any) => x.id).sort()).toEqual([live, legacy, pending].sort());
+    expect(result.total).toBe(3);
+    expect(result.items.find((x: any) => x.id === pending).estado).toBe("abierta");
+    expect(result.items.find((x: any) => x.id === legacy).venceAt).toBeNull();
+    expect((await api(query({ situacion: "encontre" }))).data.total).toBe(0);
+  });
+
+  test("el resumen no expone datos privados ni cambia de campos según quién consulta", async () => {
+    const accepted = seed({ latitud: -34.588912, longitud: -58.430678, estado: "en_reclamo" });
+    const claimant = accounts[1]!;
+    const at = nowIso();
+    db.insert(claims).values({ id: crypto.randomUUID(), publicationId: accepted, userId: claimant.id, mensaje: "Son mis llaves.", estado: "aceptado", createdAt: at, updatedAt: at }).run();
+    const open = seed({ latitud: -34.588912, longitud: -58.430678 });
+    const keys = ["id", "tipo", "titulo", "descripcion", "categoria", "barrio", "fecha", "franja", "estado", "latitud", "longitud", "ubicacion", "fotos",
+      "creadaEn", "actualizadaEn", "resueltaEn", "venceAt", "distancia"].sort();
+    for (const token of [undefined, accounts[0]!.token, claimant.token, accounts[2]!.token]) {
+      const items = (await api(query(), "GET", undefined, token)).data.items;
+      expect(items.map((x: any) => x.id)).toEqual([open]);
+      const item = items[0];
+      expect(Object.keys(item).sort()).toEqual(keys);
+      expect(item.latitud).toBe(-34.589); expect(item.longitud).toBe(-58.431); expect(item.ubicacion).toEqual({ latitud: -34.589, longitud: -58.431 });
+      expect(JSON.stringify(item)).not.toContain(ANSWER); expect(JSON.stringify(item)).not.toContain("Calle privada");
+      expect(JSON.stringify(item)).not.toContain(QUESTION);
+    }
+    // Seguidas devuelve resúmenes; mis publicaciones, el detalle propio.
+    await api(`/publicaciones/${open}/seguir`, "POST", undefined, accounts[2]!.token);
+    const followed = (await api("/me/seguidas", "GET", undefined, accounts[2]!.token)).data.items[0];
+    expect(followed).not.toHaveProperty("publicador"); expect(followed).not.toHaveProperty("direccionExacta");
+    const mine = (await api("/mis-publicaciones", "GET", undefined, accounts[0]!.token)).data.items.find((x: any) => x.id === open);
+    expect(mine.publicador.reputation).toEqual({ completedReturns: 0, positiveReviews: 0, negativeReviews: 0 });
+    expect(mine.respuestaVerificacion).toBe(ANSWER); expect(mine.direccionExacta).toBe("Calle privada 123");
+  });
+});
