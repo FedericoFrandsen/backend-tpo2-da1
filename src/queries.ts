@@ -1,10 +1,10 @@
-import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { Store } from "./database";
 import { alerts, claims, follows, halladoPublications as posts, halladoReviews, notifications, searchHistory, uploads, users } from "./db/schema";
 import { ApiError } from "./errors";
 import { config } from "./config";
 import { CATEGORIES, ZONES, type PublicationBody, type SearchFilters } from "./types";
-import { cleanText, distanceKm, localDate, normalizeText, nowIso, requireDate } from "./utils";
+import { cleanText, distanceKm, localDate, normalizeText, nowIso, pageOptions, paginate, requireDate } from "./utils";
 
 export type Post = typeof posts.$inferSelect;
 export type Claim = typeof claims.$inferSelect;
@@ -81,47 +81,57 @@ export function privateProfile(db: Store, userId: string) {
   const u = db.select().from(users).where(eq(users.id, userId)).get()!;
   return { ...publicProfile(db, userId), email: u.email, username: u.username, phone: u.phone, sharePhone: u.sharePhone, hasPassword: !!u.passwordHash };
 }
+/**
+ * Resumen (`detail = false`, listados) o detalle de una publicación. El resumen solo expone campos públicos:
+ * no consulta reputación, reclamos, seguimiento ni valoraciones, que únicamente usa el detalle.
+ * No ejecuta `expirePendingClaims`: la salida no depende de él y quien serializa en lote lo llama una sola vez.
+ */
 export function serializePost(db: Store, p: Post, viewerId?: string, detail = false) {
+  const summary = {
+    id: p.id, tipo: p.tipo, titulo: p.titulo, descripcion: p.descripcion,
+    categoria: p.categoria, barrio: p.barrio, fecha: p.fecha, franja: p.franja,
+    estado: postEstado(db, p),
+  };
+  const dates = { creadaEn: p.createdAt, actualizadaEn: p.updatedAt, resueltaEn: p.resolvedAt, venceAt: p.venceAt || null };
+  const coarse = (n: number) => Math.round(n * 1000) / 1000;
+  if (!detail) {
+    const latitud = coarse(p.latitud), longitud = coarse(p.longitud);
+    return { ...summary, latitud, longitud, ubicacion: { latitud, longitud }, fotos: p.fotos, ...dates };
+  }
   const accepted = acceptedClaim(db, p.id);
   const own = viewerId === p.userId;
   const participant = own || (!!accepted && accepted.userId === viewerId);
   const privileged = own || (!!accepted && participant);
   const publisher = publicProfile(db, p.userId);
   const source = db.select({ phone: users.phone, sharePhone: users.sharePhone }).from(users).where(eq(users.id, p.userId)).get()!;
-  expirePendingClaims(db);
   const mine = viewerId ? db.select().from(claims)
     .where(and(eq(claims.publicationId, p.id), eq(claims.userId, viewerId))).get() : null;
   const siguiendo = !!viewerId && !!db.select().from(follows)
     .where(and(eq(follows.publicationId, p.id), eq(follows.userId, viewerId))).get();
-  const latitud = privileged && detail ? p.latitud : Math.round(p.latitud * 1000) / 1000;
-  const longitud = privileged && detail ? p.longitud : Math.round(p.longitud * 1000) / 1000;
+  const latitud = privileged ? p.latitud : coarse(p.latitud);
+  const longitud = privileged ? p.longitud : coarse(p.longitud);
   const mineExpired = mine ? isClaimExpired(mine) : false;
   const mineEstado = mine ? (mineExpired ? "vencido" : mine.estado) : null;
   return {
-    id: p.id, tipo: p.tipo, titulo: p.titulo, descripcion: p.descripcion,
-    categoria: p.categoria, barrio: p.barrio, fecha: p.fecha, franja: p.franja,
-    estado: postEstado(db, p), latitud, longitud, ubicacion: { latitud, longitud }, fotos: p.fotos,
-    creadaEn: p.createdAt, actualizadaEn: p.updatedAt, resueltaEn: p.resolvedAt, venceAt: p.venceAt || null,
-    ...(detail ? {
-      preguntaVerificacion: p.preguntaVerificacion,
-      // La respuesta privada solo la ve quien publicó el hallazgo.
-      ...(own ? { respuestaVerificacion: p.respuestaVerificacion } : {}),
-      direccionExacta: privileged ? p.direccionExacta : null,
-      publicador: { ...publisher, ...(participant && accepted && source.sharePhone ? { phone: source.phone } : {}) },
-      esPropia: own, siguiendo,
-      reclamoEnviado: !!mine && ["pendiente", "aceptado"].includes(mine.estado) && !mineExpired,
-      reclamoAceptado: !!accepted && participant,
-      miReclamo: mine ? {
-        id: mine.id,
-        estado: mineEstado,
-        mensaje: mine.mensaje,
-        respuestaVerificacion: mine.respuestaVerificacion, fotoPrueba: mine.fotoPrueba, barrio: mine.barrio,
-        intentos: mine.intentos ?? 1,
-        maxIntentos: 3,
-      } : null,
-      valoracion: viewerId ? db.select({ id: halladoReviews.id, positiva: halladoReviews.positiva, comentario: halladoReviews.comentario })
-        .from(halladoReviews).where(and(eq(halladoReviews.publicationId, p.id), eq(halladoReviews.reviewerId, viewerId))).get() ?? null : null,
-    } : {}),
+    ...summary, latitud, longitud, ubicacion: { latitud, longitud }, fotos: p.fotos, ...dates,
+    preguntaVerificacion: p.preguntaVerificacion,
+    // La respuesta privada solo la ve quien publicó el hallazgo.
+    ...(own ? { respuestaVerificacion: p.respuestaVerificacion } : {}),
+    direccionExacta: privileged ? p.direccionExacta : null,
+    publicador: { ...publisher, ...(participant && accepted && source.sharePhone ? { phone: source.phone } : {}) },
+    esPropia: own, siguiendo,
+    reclamoEnviado: !!mine && ["pendiente", "aceptado"].includes(mine.estado) && !mineExpired,
+    reclamoAceptado: !!accepted && participant,
+    miReclamo: mine ? {
+      id: mine.id,
+      estado: mineEstado,
+      mensaje: mine.mensaje,
+      respuestaVerificacion: mine.respuestaVerificacion, fotoPrueba: mine.fotoPrueba, barrio: mine.barrio,
+      intentos: mine.intentos ?? 1,
+      maxIntentos: 3,
+    } : null,
+    valoracion: viewerId ? db.select({ id: halladoReviews.id, positiva: halladoReviews.positiva, comentario: halladoReviews.comentario })
+      .from(halladoReviews).where(and(eq(halladoReviews.publicationId, p.id), eq(halladoReviews.reviewerId, viewerId))).get() ?? null : null,
   };
 }
 export function serializeClaim(db: Store, claim: Claim, post: Post, viewerId: string) {
@@ -199,6 +209,69 @@ export function matchesPost(p: Post, f: SearchFilters) {
 }
 /** Coincide con los filtros y sigue vigente: las vencidas no aparecen en búsquedas ni disparan alertas. */
 export const matchesLive = (db: Store, p: Post, f: SearchFilters) => matchesPost(p, f) && !isExpired(db, p);
+/**
+ * Equivalente SQL de `!isExpired` para publicaciones abiertas: sin `venceAt`, con `venceAt` futuro
+ * o con un reclamo pendiente vigente (48 h) que la sostiene.
+ */
+function liveCondition() {
+  const cutoff = new Date(Date.now() - CLAIM_EXPIRATION_MS).toISOString();
+  return sql`(${posts.venceAt} IS NULL OR ${posts.venceAt} = '' OR ${posts.venceAt} > ${nowIso()} OR EXISTS (
+    SELECT 1 FROM hallado_claims WHERE hallado_claims.publication_id = hallado_publications.id
+      AND hallado_claims.estado = 'pendiente' AND hallado_claims.updated_at > ${cutoff}))`;
+}
+/** Caja de latitud/longitud que contiene el círculo del radio (con margen mínimo); el filtro exacto sigue siendo `distanceKm`. */
+function boundingBox(o: { latitud: number; longitud: number }, radioKm: number) {
+  const angular = radioKm / 6371, deg = 180 / Math.PI, margin = 1e-6;
+  const lat = { min: o.latitud - angular * deg - margin, max: o.latitud + angular * deg + margin };
+  const ratio = Math.sin(angular) / Math.cos(o.latitud / deg);
+  // Cerca de los polos o del antimeridiano la caja no acota la longitud: se omite ese límite.
+  if (angular >= Math.PI / 2 || ratio >= 1) return { lat, lon: null };
+  const dLon = Math.asin(ratio) * deg + margin;
+  const lon = { min: o.longitud - dLon, max: o.longitud + dLon };
+  return { lat, lon: lon.min < -180 || lon.max > 180 ? null : lon };
+}
+/**
+ * Búsqueda pública paginada. SQL aplica lo indexable (abierta, no eliminada, tipo, categoría, fechas, barrio, vigencia
+ * y caja del radio); el texto libre y la distancia exacta se resuelven en memoria sobre ese conjunto ya acotado.
+ * Para «recientes» sin palabras ni GPS el orden, el conteo y la página los resuelve SQL por completo.
+ * Resultado idéntico al de filtrar todas las abiertas con `matchesLive` y ordenar en memoria.
+ */
+export function searchPosts(db: Store, f: SearchFilters, origin: { latitud: number; longitud: number } | undefined, orden: "recientes" | "cercanos", q: Record<string, string | undefined>) {
+  const { page, pageSize } = pageOptions(q);
+  const range = dateRange(f);
+  const conditions = [
+    isNull(posts.deletedAt), eq(posts.estado, "abierta"), eq(posts.tipo, f.situacion === "perdi" ? "encontrado" : "perdido"),
+    eq(posts.categoria, f.categoria), gte(posts.fecha, range.desde), lte(posts.fecha, range.hasta), liveCondition(),
+  ];
+  const radius = f.radioKm ?? config.searchRadiusKm;
+  if (f.ubicacion) {
+    const box = boundingBox(f.ubicacion, radius);
+    conditions.push(gte(posts.latitud, box.lat.min), lte(posts.latitud, box.lat.max));
+    if (box.lon) conditions.push(gte(posts.longitud, box.lon.min), lte(posts.longitud, box.lon.max));
+  }
+  if (f.zona) {
+    // La comparación ignora tildes y mayúsculas: se resuelve sobre los barrios distintos y luego se filtra por igualdad exacta.
+    const zona = normalizeText(f.zona);
+    const barrios = db.select({ barrio: posts.barrio }).from(posts).where(and(...conditions)).groupBy(posts.barrio).all()
+      .map((r) => r.barrio).filter((b) => normalizeText(b) === zona);
+    if (!barrios.length) return { items: [], page, pageSize, total: 0, totalPages: 0 };
+    conditions.push(inArray(posts.barrio, barrios));
+  }
+  const where = and(...conditions);
+  const withKm = (p: Post) => ({ p, km: origin ? distanceKm(origin, p) : null });
+  const recent = [desc(posts.fecha), desc(posts.createdAt), posts.id];
+  const words = normalizeText(f.palabras ?? "");
+  if (orden === "recientes" && !words && !f.ubicacion) {
+    const total = db.select({ n: count() }).from(posts).where(where).get()!.n;
+    const rows = db.select().from(posts).where(where).orderBy(...recent).limit(pageSize).offset((page - 1) * pageSize).all();
+    return { items: rows.map(withKm), page, pageSize, total, totalPages: Math.ceil(total / pageSize) };
+  }
+  const items = db.select().from(posts).where(where).all()
+    .filter((p) => matchesPost(p, f)).map(withKm)
+    .sort((a, b) => (orden === "cercanos" ? (a.km! - b.km!) : 0)
+      || b.p.fecha.localeCompare(a.p.fecha) || b.p.createdAt.localeCompare(a.p.createdAt) || a.p.id.localeCompare(b.p.id));
+  return paginate(items, q);
+}
 export function searchKey(f: SearchFilters) {
   return JSON.stringify({ ...f, palabras: normalizeText(f.palabras ?? ""), zona: normalizeText(f.zona ?? "") });
 }

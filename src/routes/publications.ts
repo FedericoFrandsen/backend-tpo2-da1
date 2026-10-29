@@ -4,9 +4,9 @@ import { optionalUser, requireUser } from "../auth";
 import type { AppDatabase } from "../database";
 import { claims, follows, halladoPublications as posts } from "../db/schema";
 import { ApiError } from "../errors";
-import { filtersFromQuery, getPost, isExpired, matchesLive, notify, notifyFollowers, notifyMatches, ownerPost, postEstado, preparePublication, rememberSearch, searchOrigin, serializePost } from "../queries";
+import { expirePendingClaims, filtersFromQuery, getPost, isExpired, notify, notifyFollowers, notifyMatches, ownerPost, postEstado, preparePublication, rememberSearch, searchOrigin, searchPosts, serializePost } from "../queries";
 import { CATEGORIES, publicationBody, ZONES } from "../types";
-import { distanceKm, nowIso, paginate, publicationExpiry } from "../utils";
+import { nowIso, paginate, publicationExpiry } from "../utils";
 
 export function publicationRoutes(db: AppDatabase) {
   return new Elysia()
@@ -21,12 +21,7 @@ export function publicationRoutes(db: AppDatabase) {
       const orden = query.orden ?? "recientes";
       if (!["recientes", "cercanos"].includes(orden)) throw new ApiError(422, "INVALID_SORT", "Orden inválido");
       if (orden === "cercanos" && !origin) throw new ApiError(422, "LOCATION_REQUIRED", "Para ordenar por cercanía enviá coordenadas o elegí un barrio de la lista");
-      const items = db.select().from(posts).where(and(eq(posts.estado, "abierta"), isNull(posts.deletedAt))).all()
-        .filter((p) => matchesLive(db, p, filters))
-        .map((p) => ({ p, km: origin ? distanceKm(origin, p) : null }))
-        .sort((a, b) => (orden === "cercanos" ? (a.km! - b.km!) : 0)
-          || b.p.fecha.localeCompare(a.p.fecha) || b.p.createdAt.localeCompare(a.p.createdAt) || a.p.id.localeCompare(b.p.id));
-      const result = paginate(items, query);
+      const result = searchPosts(db, filters, origin, orden as "recientes" | "cercanos", query);
       if (user) db.transaction((tx) => rememberSearch(tx, user.id, filters));
       return { ...result, items: result.items.map(({ p, km }) => ({
         ...serializePost(db, p, user?.id), distancia: km === null ? null : Math.round(km * 10) / 10,
@@ -34,6 +29,7 @@ export function publicationRoutes(db: AppDatabase) {
     })
     .get("/publicaciones/:id", async ({ params, headers }) => {
       const user = await optionalUser(db, headers);
+      expirePendingClaims(db);
       return serializePost(db, getPost(db, params.id), user?.id, true);
     })
     .get("/mis-publicaciones", async ({ headers, query }) => {
@@ -43,6 +39,7 @@ export function publicationRoutes(db: AppDatabase) {
         .orderBy(desc(posts.createdAt), desc(posts.id)).all()
         .filter((p) => !query.estado || postEstado(db, p) === query.estado);
       const page = paginate(items, query);
+      expirePendingClaims(db);
       return { ...page, items: page.items.map((p) => serializePost(db, p, user.id, true)) };
     })
     .post("/publicaciones", async ({ headers, body, set }) => {

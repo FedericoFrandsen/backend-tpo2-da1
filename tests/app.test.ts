@@ -1092,4 +1092,26 @@ describe("búsqueda: contrato de resultados", () => {
     expect(mine.publicador.reputation).toEqual({ completedReturns: 0, positiveReviews: 0, negativeReviews: 0 });
     expect(mine.respuestaVerificacion).toBe(ANSWER); expect(mine.direccionExacta).toBe("Calle privada 123");
   });
+
+  test("la búsqueda usa un número acotado de consultas y no ejecuta escrituras ni reputación por resultado", async () => {
+    for (let i = 0; i < 30; i++) seed({ titulo: `Llaves número ${i}` });
+    for (const id of db.select({ id: posts.id }).from(posts).all().slice(0, 5).map((r) => r.id)) {
+      expire(id);
+      db.insert(claims).values({ id: crypto.randomUUID(), publicationId: id, userId: accounts[1]!.id, mensaje: "Son mis llaves.", estado: "pendiente", createdAt: nowIso(), updatedAt: nowIso() }).run();
+    }
+    const statements: string[] = [];
+    const original = db.$client.query.bind(db.$client);
+    (db.$client as any).query = (text: string) => { statements.push(text); return original(text); };
+    try {
+      for (const extra of [{}, { orden: "cercanos" }, { palabras: "llaves" }]) {
+        statements.length = 0;
+        const r = await api(query({ ...extra, pageSize: "20" } as unknown as Record<string, string>), "GET", undefined, accounts[1]!.token);
+        expect(r.data.items).toHaveLength(20);
+        // Los 5 resultados sostenidos por un reclamo vigente cuestan una consulta cada uno como máximo; el resto, ninguna.
+        expect(statements.length).toBeLessThanOrEqual(8 + 5);
+        expect(statements.filter((s) => /^\s*(update|delete)/i.test(s))).toEqual([]);
+        expect(statements.filter((s) => /hallado_reviews|follows/.test(s))).toEqual([]);
+      }
+    } finally { (db.$client as any).query = original; }
+  });
 });
