@@ -93,11 +93,11 @@ Ejemplo:
 | orden | recientes / cercanos |
 | page, pageSize | Paginación |
 
-Al usar GPS, enviar `latitud` y `longitud` como parámetros planos, no el objeto `ubicacion`. Con un barrio de la lista se usa su centro para ordenar por cercanía. Para localidades fuera de la lista, enviar coordenadas si se desea ese orden. La búsqueda pública devuelve solo publicaciones abiertas; el detalle sigue accesible al cambiar de estado.
+Al usar GPS, enviar `latitud` y `longitud` como parámetros planos, no el objeto `ubicacion`. Con un barrio de la lista se usa su centro para ordenar por cercanía. Para localidades fuera de la lista, enviar coordenadas si se desea ese orden. La búsqueda pública devuelve solo publicaciones abiertas y vigentes (las vencidas no aparecen); el detalle sigue accesible al cambiar de estado.
 
-Cada resultado tiene `id, tipo, titulo, descripcion, categoria, barrio, fecha, franja, estado, fotos, latitud, longitud, ubicacion, distancia, creadaEn, actualizadaEn, resueltaEn`.
+Cada resultado tiene `id, tipo, titulo, descripcion, categoria, barrio, fecha, franja, estado, fotos, latitud, longitud, ubicacion, distancia, creadaEn, actualizadaEn, resueltaEn, venceAt`.
 
-`tipo` es **perdido/encontrado** en las respuestas. Al crear se aceptan también **perdi/encontre**, como manda hoy `CreatePostScreen`. `estado` es **abierta/en_reclamo/resuelta**; el mock de detalle que usa `enReclamo` debe adaptarse a `en_reclamo` al conectar. El frontend debe usar `items` del servidor y quitar la paginación local para no paginar dos veces.
+`tipo` es **perdido/encontrado** en las respuestas. Al crear se aceptan también **perdi/encontre**, como manda hoy `CreatePostScreen`. `estado` es **abierta/en_reclamo/resuelta/vencida** (ver «Vencimiento y renovación»); el mock de detalle que usa `enReclamo` debe adaptarse a `en_reclamo` al conectar. El frontend debe usar `items` del servidor y quitar la paginación local para no paginar dos veces.
 
 Una búsqueda autenticada se registra automáticamente en el historial:
 
@@ -111,6 +111,7 @@ Una búsqueda autenticada se registra automáticamente en el historial:
 - Desde Expo: FormData con `file: { uri, name, type }`. Dejar que Axios/fetch genere el boundary de multipart.
 - Subir primero las fotos locales; luego enviar sus URLs devueltas en `fotos`. No enviar `file://` ni URLs externas.
 - `GET /uploads/:filename` sirve la imagen. Las imágenes subidas son públicas; evitá fotografiar datos personales o una dirección exacta que no quieras exponer.
+- Fotos de comprobación (privadas): `POST /uploads/pruebas` (mismo multipart y mismas validaciones, requiere token) devuelve `{ url: "/uploads/pruebas/<uuid>.<ext>", filename }`. Se guardan aparte de las públicas y **no** sirven como foto de publicación ni avatar. `GET /uploads/pruebas/:filename` exige token y solo responde (200, `Cache-Control: private, no-store`) a quien la subió y al dueño de la publicación sobre la que existe un reclamo que la referencia; al resto 403 `FORBIDDEN`, sin sesión 401, inexistente 404 `PROOF_NOT_FOUND`. Para mostrarla en Expo hay que enviar el header `Authorization` en la petición de la imagen (`<Image source={{ uri, headers }} />`) y no cachearla en disco compartido.
 
 ```json
 {
@@ -123,16 +124,32 @@ Una búsqueda autenticada se registra automáticamente en el historial:
   "fecha": "2026-10-20",
   "franja": "tarde",
   "direccionExacta": "Dirección privada opcional",
-  "fotos": ["/uploads/uuid.png"]
+  "fotos": ["/uploads/uuid.png"],
+  "preguntaVerificacion": "¿Qué dibujo tiene el llavero?",
+  "respuestaVerificacion": "Una estrella azul",
+  "clientId": "0b0f7c3e-6d0a-4c53-9a1e-6c4c1d2b7f10"
 }
 ```
+
+- `preguntaVerificacion` (máx. 200, mínimo 3) y `respuestaVerificacion` (máx. 200) son **obligatorias al crear un `encontrado`** (422 `VERIFICATION_QUESTION_REQUIRED` / `VERIFICATION_ANSWER_REQUIRED`) y se ignoran (quedan `null`) en `perdido`. El dueño las edita con `PATCH`; no puede dejarlas vacías en un hallazgo que ya las tenía (los hallazgos creados antes de este contrato pueden seguir sin pregunta hasta que el dueño la cargue).
+- **Privacidad**: `preguntaVerificacion` es pública solo en el detalle (`GET /publicaciones/:id`). `respuestaVerificacion` se devuelve únicamente al dueño (detalle con su sesión, `POST/PATCH /publicaciones`, `GET /mis-publicaciones`, y el objeto `publicacion` embebido en sus reclamos recibidos). Nunca aparece en búsquedas, detalle de terceros o anónimo, seguidas, alertas, notificaciones ni historial.
+- `clientId` (opcional, string de 8 a 100 caracteres, p. ej. un UUID generado en el móvil) hace idempotente el alta: es único por usuario. Si se repite, `POST /publicaciones` devuelve **200** con la publicación ya creada (en lugar de 201 y un duplicado), sin validar de nuevo el cuerpo. Si esa publicación fue eliminada después, responde 409 `CLIENT_ID_ALREADY_USED`: generar un `clientId` nuevo. Pensado para reintentar la cola offline sin duplicar.
 
 - `POST /publicaciones`: crear; devuelve 201 y el detalle.
 - `PATCH /publicaciones/:id`: enviar solo campos editados. Solo el dueño y mientras está abierta.
 - `DELETE /publicaciones/:id`: eliminación lógica, solo el dueño y si está abierta. Se conserva la trazabilidad; no se puede eliminar una devolución resuelta.
-- `GET /mis-publicaciones`: propias, paginadas; filtro opcional `estado`.
+- `POST /publicaciones/:id/renovar`: solo el dueño; fija `venceAt` en ahora + 30 días y devuelve el detalle. 409 `PUBLICATION_LOCKED` si está resuelta, 404 si fue eliminada, 403 si no es el dueño.
+- `GET /mis-publicaciones`: propias, paginadas; filtro opcional `estado` (`abierta`, `en_reclamo`, `resuelta`, `vencida`; otro valor da 422).
 - Cambiar barrio sin coordenadas usa el centro del barrio de la lista. Con GPS y sin barrio se guarda la etiqueta "Ubicación actual". No se hace geocodificación externa.
 - `direccionExacta` es opcional porque la pantalla de creación actual no la pide. Si se quiere coordinar por una dirección concreta, se puede añadir ese campo en la app o enviar un mensaje privado después de aceptar.
+
+## Vencimiento y renovación
+
+- Toda publicación tiene `venceAt` (ISO) = creación + 30 días. `POST /publicaciones/:id/renovar` lo reinicia a ahora + 30 días.
+- El estado `vencida` es **derivado en lectura** (no se guarda): una publicación `abierta` con `venceAt` pasado se expone como `estado: "vencida"` en todas las respuestas. Así no hay tareas programadas ni cambios en el CHECK de estados.
+- Las vencidas no aparecen en `GET /publicaciones`, no generan notificaciones de alertas (ni al reactivar una alerta), y no aceptan reclamos nuevos ni seguir (409 `PUBLICATION_EXPIRED`). Siguen visibles por id, en `GET /mis-publicaciones?estado=vencida`, en seguidas y en el historial del dueño. Renovar una vencida la vuelve a mostrar y avisa a las alertas que coinciden (una sola vez por alerta).
+- Reclamos en curso: una publicación `en_reclamo` (reclamo aceptado) **no vence** mientras siga así; una `abierta` con un reclamo pendiente vigente (menos de 48 h) tampoco. Si el reclamo se vence, se rechaza o se cancela y `venceAt` ya pasó, la publicación pasa a `vencida` (el dueño puede renovarla). Resolver (`resuelta`) no vence nunca.
+- Migración: las publicaciones existentes reciben `venceAt` = momento de la migración + 30 días, para no vencer de golpe datos previos o de demostración.
 
 ## Detalle y seguimiento: usePublicacion
 
@@ -141,13 +158,13 @@ Una búsqueda autenticada se registra automáticamente en el historial:
 - `DELETE /publicaciones/:id/seguir`: idempotente.
 - `GET /me/seguidas`: seguidas, paginadas.
 
-El detalle agrega `publicador`, `esPropia`, `siguiendo`, `reclamoEnviado`, `reclamoAceptado`, `miReclamo`, `direccionExacta` y la `valoracion` que hizo el usuario actual. `publicador` tiene el formato del perfil público. Su teléfono solo aparece si el reclamo aceptado corresponde al usuario actual y el publicador eligió compartirlo. La dirección exacta es null para cualquier tercero sin ese reclamo aceptado. El propio autor siempre puede consultar la dirección que cargó.
+El detalle agrega `preguntaVerificacion` (y `respuestaVerificacion` solo para el dueño), `publicador`, `esPropia`, `siguiendo`, `reclamoEnviado`, `reclamoAceptado`, `miReclamo`, `direccionExacta` y la `valoracion` que hizo el usuario actual. `publicador` tiene el formato del perfil público. Su teléfono solo aparece si el reclamo aceptado corresponde al usuario actual y el publicador eligió compartirlo. La dirección exacta es null para cualquier tercero sin ese reclamo aceptado. El propio autor siempre puede consultar la dirección que cargó.
 
 ## Reclamos y gestión: useGestionPublicacion
 
 | Acción | Petición |
 | --- | --- |
-| Es mío / Lo encontré | POST `/publicaciones/:id/reclamos` con `{ mensaje }` |
+| Es mío / Lo encontré | POST `/publicaciones/:id/reclamos` con `{ mensaje, respuestaVerificacion?, fotoPrueba?, barrio? }` (ver reglas abajo) |
 | Ver reclamos de una publicación propia | GET `/publicaciones/:id/reclamos` |
 | Ver mis reclamos enviados | GET `/me/reclamos` |
 | Consultar un reclamo como participante | GET `/reclamos/:id` |
@@ -157,7 +174,20 @@ El detalle agrega `publicador`, `esPropia`, `siguiendo`, `reclamoEnviado`, `recl
 | Concretar devolución como publicador | POST `/publicaciones/:id/resolver` |
 | Valorar contraparte | POST `/publicaciones/:id/valoraciones` con `{ positiva, comentario? }` |
 
-Un reclamo incluye `id, publicacionId, usuarioId, usuario, perfil, mensaje, estado, permiteTelefono, telefono, creadaEn, actualizadaEn`. `telefono` solo se completa si ese reclamo está aceptado, hay consentimiento y quien lo consulta participa. Los otros reclamantes no pueden consultar el listado del dueño.
+Un reclamo incluye `id, publicacionId, usuarioId, usuario, perfil, mensaje, respuestaVerificacion, fotoPrueba, barrio, estado, intentos, maxIntentos, permiteTelefono, telefono, creadaEn, actualizadaEn`. `telefono` solo se completa si ese reclamo está aceptado, hay consentimiento y quien lo consulta participa. Los otros reclamantes no pueden consultar el listado del dueño.
+
+Reglas del reclamo estructurado (`mensaje` sigue siendo obligatorio, 5 a 1000 caracteres; las validaciones nuevas se aplican después de las de duplicado/intentos):
+
+| Reclamo | Sobre | Obligatorio | Error 422 |
+| --- | --- | --- | --- |
+| «Es mío» | publicación `encontrado` con pregunta | `respuestaVerificacion` (no vacía, máx. 200) | `VERIFICATION_ANSWER_REQUIRED` |
+| «Lo encontré» | publicación `perdido` | `fotoPrueba` y `barrio` | `PROOF_PHOTO_REQUIRED`, `BARRIO_REQUIRED` |
+
+- `barrio` debe estar en `GET /barrios` (sin distinguir tildes/mayúsculas; se guarda con el nombre canónico), si no 422 `INVALID_BARRIO`. Es opcional en «Es mío».
+- `fotoPrueba` es la `url` (o el `filename`) devuelto por `POST /uploads/pruebas`, subida por el mismo reclamante: formato inválido o foto pública 422 `INVALID_PROOF`; foto de otra cuenta 403 `PROOF_NOT_OWNED`. Es opcional en «Es mío». Se guarda como `/uploads/pruebas/<uuid>.<ext>`.
+- En «Lo encontré» se ignora `respuestaVerificacion`. En un reintento (hasta 3 intentos, vencimiento a 48 h sin cambios) se reemplazan los tres campos.
+- `respuestaVerificacion`, `fotoPrueba` y `barrio` se devuelven solo a los participantes: el reclamante (`POST`, `GET /reclamos/:id`, `GET /me/reclamos`, `miReclamo` del detalle) y el dueño de la publicación (`GET /publicaciones/:id/reclamos`, `GET /reclamos/:id`, `GET /me/reclamos`). Para comparar, el dueño de un hallazgo lee `respuestaVerificacion` del reclamo y la suya en `publicacion.respuestaVerificacion` (embebida en `GET /reclamos/:id` y `GET /me/reclamos`) o en `GET /publicaciones/:id`.
+- Reclamar una publicación vencida da 409 `PUBLICATION_EXPIRED`.
 
 Estados: publicación abierta → aceptar reclamo → en_reclamo → resolver → resuelta. Solo hay un reclamo aceptado a la vez. Para aceptar otro, primero rechazar o cancelar el actual. Los demás pendientes se cierran al resolver. Rechazar/cancelar el aceptado revoca el acceso privado y vuelve a abrir la publicación. Una devolución resuelta no se reabre ni se edita.
 

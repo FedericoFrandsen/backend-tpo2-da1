@@ -82,6 +82,7 @@ Si una cuenta demo ya existía, se conserva su contraseña anterior. Las fotos d
 - Búsqueda del tipo opuesto, categoría, palabras sin distinción de tildes/mayúsculas, barrio, períodos/rango, coordenadas y radio.
 - Resultados paginados y ordenados por fecha o cercanía; hasta cinco búsquedas recientes por usuario.
 - Publicaciones perdidas/encontradas: creación, edición, eliminación lógica, fotos y gestión de estados.
+- Pregunta/respuesta de verificación del publicador (respuesta privada), reclamos con respuesta, foto de prueba privada y barrio, vencimiento a 30 días con renovación y alta idempotente por `clientId`.
 - Reclamos: crear, aceptar, rechazar, cancelar y resolver una devolución; un único aceptado por publicación.
 - Dirección exacta reservada al autor y al reclamante aceptado. Coordenadas públicas redondeadas a tres decimales; distancia redondeada a 0.1 km.
 - Teléfono visible a la contraparte únicamente con reclamo aceptado y consentimiento vigente.

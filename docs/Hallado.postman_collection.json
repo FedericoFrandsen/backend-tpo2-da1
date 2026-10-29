@@ -69,6 +69,14 @@
       "key": "fotoUrl",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "pruebaFilename",
+      "value": ""
+    },
+    {
+      "key": "pruebaUrl",
+      "value": ""
     }
   ],
   "auth": {
@@ -126,6 +134,46 @@
               }
             }
           ]
+        },
+        {
+          "name": "POST /uploads/pruebas",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/uploads/pruebas",
+            "description": "Foto de comprobación privada. Devuelve url para usar en fotoPrueba de un reclamo.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": null,
+                  "description": "Seleccioná una foto JPEG, PNG o WebP menor a 5 MB."
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) { const r = pm.response.json(); pm.collectionVariables.set(\"pruebaFilename\", r.filename); pm.collectionVariables.set(\"pruebaUrl\", r.url); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /uploads/pruebas/:filename",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/uploads/pruebas/{{pruebaFilename}}",
+            "description": "Requiere sesión; solo quien la subió o el dueño de la publicación reclamada con esa foto."
+          }
         },
         {
           "name": "GET /uploads/:filename",
@@ -391,10 +439,10 @@
               }
             ],
             "url": "{{baseUrl}}/publicaciones/{{publicacionId}}/reclamos",
-            "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
+            "description": "Es mío (sobre un hallazgo con pregunta): respuestaVerificacion. Lo encontré (sobre una pérdida): fotoPrueba (de POST /uploads/pruebas) y barrio obligatorios.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"mensaje\": \"Creo que son mis llaves, tienen una marca en el llavero.\"\n}",
+              "raw": "{\n  \"mensaje\": \"Creo que son mis llaves, tienen una marca en el llavero.\",\n  \"respuestaVerificacion\": \"Una estrella azul\",\n  \"fotoPrueba\": \"{{pruebaUrl}}\",\n  \"barrio\": \"Palermo\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -609,7 +657,7 @@
             "description": "Ver docs/INTEGRACION.md. Las rutas privadas usan el token Bearer de la colección.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tipo\": \"encontre\",\n  \"titulo\": \"Llaves con llavero azul\",\n  \"descripcion\": \"Juego de tres llaves con un llavero azul.\",\n  \"categoria\": \"Llaves\",\n  \"barrio\": \"Palermo\",\n  \"fecha\": \"{{today}}\",\n  \"franja\": \"tarde\",\n  \"direccionExacta\": \"Dirección de prueba 123\",\n  \"fotos\": []\n}",
+              "raw": "{\n  \"tipo\": \"encontre\",\n  \"titulo\": \"Llaves con llavero azul\",\n  \"descripcion\": \"Juego de tres llaves con un llavero azul.\",\n  \"categoria\": \"Llaves\",\n  \"barrio\": \"Palermo\",\n  \"fecha\": \"{{today}}\",\n  \"franja\": \"tarde\",\n  \"direccionExacta\": \"Dirección de prueba 123\",\n  \"fotos\": [],\n  \"preguntaVerificacion\": \"¿Qué dibujo tiene el llavero?\",\n  \"respuestaVerificacion\": \"Una estrella azul\",\n  \"clientId\": \"{{$guid}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -623,7 +671,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "if (pm.response.code === 201) pm.collectionVariables.set(\"publicacionId\", pm.response.json().id);"
+                  "if (pm.response.code === 201 || pm.response.code === 200) pm.collectionVariables.set(\"publicacionId\", pm.response.json().id);"
                 ]
               }
             }
@@ -650,6 +698,15 @@
                 }
               }
             }
+          }
+        },
+        {
+          "name": "POST /publicaciones/:id/renovar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/publicaciones/{{publicacionId}}/renovar",
+            "description": "Solo el dueño. Fija venceAt = ahora + 30 días."
           }
         },
         {
