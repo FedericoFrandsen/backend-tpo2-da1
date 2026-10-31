@@ -4,7 +4,7 @@ import { requireUser } from "../auth";
 import type { AppDatabase } from "../database";
 import { alerts, halladoPublications as posts, notifications, searchHistory } from "../db/schema";
 import { ApiError } from "../errors";
-import { matchesLive, normalizeFilters, notify, rememberSearch, searchKey } from "../queries";
+import { matchesLive, normalizeFilters, notify, reconcileFollowedExpiries, rememberSearch, searchKey } from "../queries";
 import { filtersSchema } from "../types";
 import { nowIso, paginate } from "../utils";
 
@@ -80,6 +80,7 @@ export function searchRoutes(db: AppDatabase) {
     })
     .get("/notificaciones", async ({ headers, query }) => {
       const user = await requireUser(db, headers);
+      db.transaction((tx) => reconcileFollowedExpiries(tx, user.id));
       const rows = db.select().from(notifications).where(eq(notifications.userId, user.id))
         .orderBy(desc(notifications.createdAt), desc(notifications.id)).all();
       const page = paginate(rows, query);
