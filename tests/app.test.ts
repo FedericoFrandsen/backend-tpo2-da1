@@ -9,7 +9,7 @@ import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { createApp } from "../src/app";
 import { createDatabase } from "../src/database";
 import { createSession } from "../src/auth";
-import { claims, halladoPublications as posts, loginAttempts, otpCodes, sessions, users } from "../src/db/schema";
+import { alerts, claims, follows, halladoPublications as posts, halladoReviews, loginAttempts, notifications, otpCodes, sessions, thanks, users } from "../src/db/schema";
 import { localDate, nowIso } from "../src/utils";
 import { config } from "../src/config";
 import { sendOtp } from "../src/mailer";
@@ -1259,5 +1259,337 @@ describe("novedades de vencimiento y renovación para seguidores", () => {
     expect((await renew(p.id)).response.status).toBe(200);
     expect(withPrefix(await notifs(2), "Se renovó")).toHaveLength(1);
     expect((await notifs(2)).total).toBe(2);
+  });
+});
+
+describe("listados paginados: contrato", () => {
+  const ARGENTINA = "America/Argentina/Buenos_Aires";
+  const DAY = 86_400_000;
+  let zone: string;
+  // El filtro por día local depende de la zona: se fija para que las pruebas no dependan del entorno.
+  beforeEach(() => { zone = config.timeZone; (config as { timeZone: string }).timeZone = ARGENTINA; });
+  afterEach(() => { (config as { timeZone: string }).timeZone = zone; });
+
+  const get = (path: string, account: number) => api(path, "GET", undefined, accounts[account]!.token);
+  const idsOf = (r: { data: any }) => r.data.items.map((x: any) => x.id);
+  const uid = (n: number) => accounts[n]!.id;
+  const at = (n: number) => new Date(Date.UTC(2026, 2, 1) + n * 60_000).toISOString();
+  let seq = 0;
+  beforeEach(() => { seq = 0; });
+  function addUser(id: string) {
+    db.insert(users).values({ id, email: `${id}@example.com`, passwordHash, name: id, zone: "Palermo", createdAt: nowIso(), emailVerifiedAt: nowIso() }).run();
+    return id;
+  }
+  function insertPost(extra: Partial<typeof posts.$inferInsert> & { id: string }) {
+    const stamp = at(seq++);
+    db.insert(posts).values({ userId: uid(1), tipo: "encontrado", titulo: `Publicación ${extra.id}`, descripcion: "Descripción de la publicación de prueba.",
+      categoria: "Llaves", barrio: "Palermo", fecha: localDate(), franja: "tarde", latitud: -34.5889, longitud: -58.4306,
+      direccionExacta: "Calle privada 123", fotos: [], createdAt: stamp, updatedAt: stamp, ...extra }).run();
+    return extra.id;
+  }
+  /** Recorre todas las páginas verificando los metadatos de cada una y devuelve los ids en el orden recibido. */
+  async function walk(path: string, account: number, pageSize: number, total: number) {
+    const sep = path.includes("?") ? "&" : "?";
+    const totalPages = Math.ceil(total / pageSize);
+    const seen: string[] = [];
+    for (let page = 1; page <= totalPages; page++) {
+      const r = await get(`${path}${sep}page=${page}&pageSize=${pageSize}`, account);
+      expect(r.response.status).toBe(200);
+      expect(r.data).toMatchObject({ page, pageSize, total, totalPages });
+      expect(r.data.items).toHaveLength(page < totalPages ? pageSize : total - pageSize * (totalPages - 1));
+      seen.push(...idsOf(r));
+    }
+    const beyond = await get(`${path}${sep}page=${totalPages + 1}&pageSize=${pageSize}`, account);
+    expect(beyond.data.items).toEqual([]);
+    expect(beyond.data).toMatchObject({ page: totalPages + 1, pageSize, total, totalPages });
+    return seen;
+  }
+  const descending = <T>(rows: T[], key: (row: T) => string, tie: (row: T) => string) =>
+    [...rows].sort((a, b) => key(b).localeCompare(key(a)) || tie(b).localeCompare(tie(a)));
+
+  test("/me/seguidas: ordena por actualización, pagina en cuatro páginas, excluye eliminadas y ajenas, y deriva el estado", async () => {
+    const viewer = 2;
+    const fixture: { id: string; updatedAt: string }[] = [];
+    // i * 5 mod 14 recorre una permutación: la actualización no coincide con el orden de alta ni de id.
+    for (let i = 0; i < 14; i++) {
+      const id = `s-${String(i).padStart(2, "0")}`;
+      const updatedAt = at(1000 + (i * 5) % 14);
+      insertPost({ id, updatedAt });
+      db.insert(follows).values({ userId: uid(viewer), publicationId: id, createdAt: at(i) }).run();
+      fixture.push({ id, updatedAt });
+    }
+    const past = new Date(Date.now() - DAY).toISOString();
+    db.update(posts).set({ venceAt: past }).where(eq(posts.id, "s-03")).run();
+    db.update(posts).set({ venceAt: past }).where(eq(posts.id, "s-04")).run();
+    db.insert(claims).values({ id: "pending-claim", publicationId: "s-04", userId: uid(0), mensaje: "Son mis llaves.", estado: "pendiente", createdAt: nowIso(), updatedAt: nowIso() }).run();
+    db.update(posts).set({ estado: "en_reclamo" }).where(eq(posts.id, "s-05")).run();
+    db.update(posts).set({ estado: "resuelta", resolvedAt: nowIso() }).where(eq(posts.id, "s-06")).run();
+    // Eliminadas seguidas: no cuentan. Seguidas por otra cuenta y publicaciones sin seguir: no aparecen.
+    for (const id of ["gone-1", "gone-2"]) {
+      insertPost({ id, deletedAt: nowIso(), updatedAt: at(5000) });
+      db.insert(follows).values({ userId: uid(viewer), publicationId: id, createdAt: at(50) }).run();
+    }
+    insertPost({ id: "others-only", updatedAt: at(6000) });
+    insertPost({ id: "not-followed", updatedAt: at(6001) });
+    for (const id of ["s-00", "s-01", "others-only"]) db.insert(follows).values({ userId: uid(0), publicationId: id, createdAt: at(60) }).run();
+
+    const expected = descending(fixture, (f) => f.updatedAt, (f) => f.id).map((f) => f.id);
+    for (const size of [4, 5, 7, 20]) expect(await walk("/me/seguidas", viewer, size, 14)).toEqual(expected);
+    const all = (await get("/me/seguidas?pageSize=100", viewer)).data;
+    expect(Object.keys(all)).toEqual(["items", "page", "pageSize", "total", "totalPages"]);
+    const estado = Object.fromEntries(all.items.map((x: any) => [x.id, x.estado]));
+    expect(estado).toMatchObject({ "s-03": "vencida", "s-04": "abierta", "s-05": "en_reclamo", "s-06": "resuelta", "s-00": "abierta" });
+    expect(Object.keys(all.items[0]).sort()).toEqual(["id", "tipo", "titulo", "descripcion", "categoria", "barrio", "fecha", "franja", "estado",
+      "latitud", "longitud", "ubicacion", "fotos", "creadaEn", "actualizadaEn", "resueltaEn", "venceAt"].sort());
+    expect(JSON.stringify(all)).not.toContain("Calle privada");
+    // Cada cuenta ve solo lo que sigue; sin seguidas la página es vacía con total 0.
+    expect(idsOf(await get("/me/seguidas", 0)).sort()).toEqual(["others-only", "s-00", "s-01"]);
+    expect((await get("/me/seguidas", 1)).data).toEqual({ items: [], page: 1, pageSize: 20, total: 0, totalPages: 0 });
+  });
+
+  describe("historial", () => {
+    const E = "encontrado" as const, P = "perdido" as const;
+    type Case = { id: string; owner: string; claimant: string; tipo: typeof E | typeof P; resolvedAt: string | null; estado: "resuelta" | "en_reclamo"; deleted: boolean; claim: "aceptado" | "rechazado" };
+    let all: Case[];
+    function insertCase(id: string, owner: string, claimant: string, tipo: typeof E | typeof P, resolvedAt: string | null, extra: Partial<Case> = {}) {
+      const c: Case = { id, owner, claimant, tipo, resolvedAt, estado: "resuelta", deleted: false, claim: "aceptado", ...extra };
+      insertPost({ id, userId: owner, tipo, estado: c.estado, resolvedAt, deletedAt: c.deleted ? nowIso() : null });
+      db.insert(claims).values({ id: `claim-${id}`, publicationId: id, userId: claimant, mensaje: "Son mis llaves.", estado: c.claim, createdAt: at(seq), updatedAt: at(seq) }).run();
+      all.push(c);
+      return c;
+    }
+    const caseType = (c: Case, viewer: string) => ((c.tipo === E ? c.owner : c.claimant) === viewer ? "devolvi" : "recupere");
+    const involves = (c: Case, viewer: string) => c.owner === viewer || c.claimant === viewer;
+    /** Lo que debe ver `viewer`, en orden: resueltas con aceptado, no eliminadas y con fecha, más recientes primero. */
+    const visible = (viewer: string) => descending(
+      all.filter((c) => c.estado === "resuelta" && c.claim === "aceptado" && !c.deleted && c.resolvedAt && involves(c, viewer)),
+      (c) => c.resolvedAt!, (c) => c.id);
+    let u: string[];
+    beforeEach(() => {
+      all = [];
+      u = [uid(0), uid(1), uid(2), addUser("extra-3")];
+      const [u0, u1, u2, u3] = u as [string, string, string, string];
+      insertCase("h-01", u0, u1, E, "2026-03-01T15:00:00.000Z");
+      insertCase("h-02", u0, u1, P, "2026-03-02T15:00:00.000Z");
+      insertCase("h-03", u1, u0, E, "2026-03-03T15:00:00.000Z");
+      insertCase("h-04", u1, u0, P, "2026-03-04T15:00:00.000Z");
+      // Tres casos con el mismo instante: el desempate es el id, descendente.
+      insertCase("h-05", u0, u2, E, "2026-03-05T15:00:00.000Z");
+      insertCase("h-06", u2, u0, P, "2026-03-05T15:00:00.000Z");
+      insertCase("h-07", u0, u3, P, "2026-03-05T15:00:00.000Z");
+      insertCase("h-08", u3, u0, E, "2026-03-07T15:00:00.000Z");
+      insertCase("h-09", u0, u1, E, "2026-03-08T15:00:00.000Z");
+      insertCase("h-10", u1, u0, E, "2026-03-09T15:00:00.000Z");
+      insertCase("h-11", u0, u2, P, "2026-03-10T15:00:00.000Z");
+      insertCase("h-12", u2, u0, E, "2026-03-11T15:00:00.000Z");
+      insertCase("h-13", u0, u1, E, "2026-03-12T15:00:00.000Z");
+      insertCase("h-14", u0, u3, E, new Date(Date.now() - DAY).toISOString());
+      // No son casos del historial: eliminada, sin fecha de resolución, reclamo rechazado, publicación no resuelta y pareja ajena.
+      insertCase("x-eliminada", u0, u1, E, "2026-03-06T15:00:00.000Z", { deleted: true });
+      insertCase("x-sin-fecha", u0, u1, E, null);
+      insertCase("x-rechazado", u0, u1, E, "2026-03-06T16:00:00.000Z", { claim: "rechazado" });
+      insertCase("x-abierta", u0, u1, E, "2026-03-06T17:00:00.000Z", { estado: "en_reclamo" });
+      insertCase("x-ajeno", u1, u2, E, "2026-03-06T18:00:00.000Z");
+      const review = (id: string, publicationId: string, reviewerId: string, reviewedUserId: string, positiva: boolean, comentario: string) =>
+        db.insert(halladoReviews).values({ id, publicationId, reviewerId, reviewedUserId, positiva, comentario, createdAt: nowIso() }).run();
+      review("r1", "h-01", u0, u1, true, "Gracias");
+      review("r2", "h-01", u1, u0, false, "La otra parte");
+      review("r3", "h-04", u0, u1, false, "");
+      const thank = (id: string, publicationId: string, authorId: string, recipientId: string, mensaje: string) =>
+        db.insert(thanks).values({ id, publicationId, authorId, recipientId, mensaje, createdAt: nowIso() }).run();
+      // h-03: u0 recuperó y agradeció. h-04: agradeció la otra parte, así que u0 no lo ve en su historial.
+      thank("t1", "h-03", u0, u1, "Gracias por las llaves");
+      thank("t2", "h-04", u1, u0, "Gracias, de parte de la otra persona");
+    });
+
+    function expectedItem(c: Case, viewer: string) {
+      const other = c.owner === viewer ? c.claimant : c.owner;
+      const user = db.select().from(users).where(eq(users.id, other)).get()!;
+      const completed = all.filter((x) => x.estado === "resuelta" && (x.owner === other || (x.claim === "aceptado" && x.claimant === other))).length;
+      const received = db.select().from(halladoReviews).where(eq(halladoReviews.reviewedUserId, other)).all();
+      const mine = db.select().from(halladoReviews).where(eq(halladoReviews.reviewerId, viewer)).all().find((r) => r.publicationId === c.id);
+      const thanked = db.select().from(thanks).where(eq(thanks.authorId, viewer)).all().find((t) => t.publicationId === c.id);
+      const limite = new Date(Date.parse(c.resolvedAt!) + 7 * DAY).toISOString();
+      return {
+        id: c.id, fecha: c.resolvedAt, tipo: caseType(c, viewer),
+        objeto: { titulo: `Publicación ${c.id}`, categoria: "Llaves", tipo: c.tipo },
+        contraparte: { id: other, name: user.name, zone: "Palermo", avatarUrl: null, memberSince: user.createdAt,
+          reputation: { completedReturns: completed, positiveReviews: received.filter((r) => r.positiva).length, negativeReviews: received.filter((r) => !r.positiva).length },
+          badges: completed >= 5 ? [{ id: "vecino-solidario", name: "Vecino solidario", description: "Por concretar 5 devoluciones." }] : [] },
+        valoracion: mine ? { positiva: mine.positiva, comentario: mine.comentario } : null,
+        agradecimiento: thanked ? { mensaje: thanked.mensaje } : null,
+        limiteValoracion: limite, puedeValorar: !mine && nowIso() <= limite,
+      };
+    }
+
+    test("pagina en cuatro páginas con orden por resolución e id, y cada item conserva su forma, perfiles repetidos y tipo", async () => {
+      const [u0] = u as [string];
+      const expected = visible(u0);
+      expect(expected.map((c) => c.id)).toEqual(["h-14", "h-13", "h-12", "h-11", "h-10", "h-09", "h-08", "h-07", "h-06", "h-05", "h-04", "h-03", "h-02", "h-01"]);
+      for (const size of [4, 5, 13, 100]) expect(await walk("/me/historial", 0, size, 14)).toEqual(expected.map((c) => c.id));
+      const full = (await get("/me/historial?pageSize=100", 0)).data;
+      expect(Object.keys(full)).toEqual(["items", "page", "pageSize", "total", "totalPages"]);
+      expect(full.items).toEqual(expected.map((c) => expectedItem(c, u0)));
+      // Los tipos salen de quién devolvió: el que publicó un hallazgo o el que reclamó un objeto perdido.
+      expect(Object.fromEntries(full.items.map((x: any) => [x.id, x.tipo]))).toEqual(Object.fromEntries(expected.map((c) => [c.id, caseType(c, u0)])));
+      expect(full.items.find((x: any) => x.id === "h-01").valoracion).toEqual({ positiva: true, comentario: "Gracias" });
+      expect(full.items.find((x: any) => x.id === "h-01").puedeValorar).toBe(false);
+      expect(full.items.find((x: any) => x.id === "h-14").puedeValorar).toBe(true);
+      expect(full.items.find((x: any) => x.id === "h-03").agradecimiento).toEqual({ mensaje: "Gracias por las llaves" });
+      expect(full.items.find((x: any) => x.id === "h-04").agradecimiento).toBeNull();
+      // Con perfiles repetidos, la reputación de la contraparte es la misma en todos sus casos.
+      const rep = full.items.filter((x: any) => x.contraparte.id === u[1]).map((x: any) => JSON.stringify(x.contraparte));
+      expect(rep.length).toBeGreaterThan(3); expect(new Set(rep).size).toBe(1);
+      expect(JSON.stringify(full)).not.toContain("Calle privada");
+    });
+
+    test("filtra por tipo y pagina cada subconjunto con su propio total", async () => {
+      const [u0] = u as [string];
+      for (const tipo of ["devolvi", "recupere"] as const) {
+        const expected = visible(u0).filter((c) => caseType(c, u0) === tipo).map((c) => c.id);
+        expect(expected.length).toBeGreaterThan(3);
+        for (const size of [3, 4, 100]) expect(await walk(`/me/historial?tipo=${tipo}`, 0, size, expected.length)).toEqual(expected);
+      }
+    });
+
+    test("cada cuenta ve solo sus casos", async () => {
+      for (const [account, viewer] of [[0, u[0]!], [1, u[1]!], [2, u[2]!]] as const) {
+        const expected = visible(viewer);
+        expect(await walk("/me/historial", account, 3, expected.length)).toEqual(expected.map((c) => c.id));
+        expect((await get("/me/historial?pageSize=100", account)).data.items).toEqual(expected.map((c) => expectedItem(c, viewer)));
+      }
+      expect((await get("/me/historial", 2)).data.items.map((x: any) => x.id)).not.toContain("h-01");
+    });
+
+    test("sin casos devuelve una página vacía", async () => {
+      db.delete(thanks).run(); db.delete(halladoReviews).run(); db.delete(claims).run(); db.delete(posts).run();
+      expect((await get("/me/historial", 0)).data).toEqual({ items: [], page: 1, pageSize: 20, total: 0, totalPages: 0 });
+    });
+  });
+
+  test("/me/historial: el rango de fechas es por día local inclusivo, no por día UTC, y respeta el borde de medianoche", async () => {
+    const [u0, u1] = [uid(0), uid(1)];
+    const put = (id: string, resolvedAt: string, owner = u0, claimant = u1) => {
+      insertPost({ id, userId: owner, estado: "resuelta", resolvedAt });
+      db.insert(claims).values({ id: `claim-${id}`, publicationId: id, userId: claimant, mensaje: "Son mis llaves.", estado: "aceptado", createdAt: at(seq), updatedAt: at(seq) }).run();
+    };
+    // Argentina es UTC-3: la medianoche local del 10/03 es 03:00Z.
+    put("b1", "2026-03-10T02:59:59.999Z");
+    put("b2", "2026-03-10T03:00:00.000Z");
+    put("b2-bis", "2026-03-10T03:00:00.000Z");
+    put("b3", "2026-03-11T02:59:59.999Z");
+    put("b4", "2026-03-11T03:00:00.000Z");
+    put("r1", "2026-03-10T03:00:00.000Z", u1, u0); // recupere
+    const listed = async (qs: string) => (await get(`/me/historial?pageSize=100&${qs}`, 0)).data;
+    expect(idsOf({ data: await listed("desde=2026-03-10&hasta=2026-03-10") })).toEqual(["b3", "r1", "b2-bis", "b2"]);
+    expect(idsOf({ data: await listed("desde=2026-03-09&hasta=2026-03-09") })).toEqual(["b1"]);
+    expect(idsOf({ data: await listed("desde=2026-03-11&hasta=2026-03-11") })).toEqual(["b4"]);
+    expect(idsOf({ data: await listed("desde=2026-03-10") })).toEqual(["b4", "b3", "r1", "b2-bis", "b2"]);
+    expect(idsOf({ data: await listed("hasta=2026-03-10") })).toEqual(["b3", "r1", "b2-bis", "b2", "b1"]);
+    expect(idsOf({ data: await listed("desde=2026-03-09&hasta=2026-03-11") })).toEqual(["b4", "b3", "r1", "b2-bis", "b2", "b1"]);
+    expect(idsOf({ data: await listed("tipo=recupere&desde=2026-03-10&hasta=2026-03-10") })).toEqual(["r1"]);
+    expect(idsOf({ data: await listed("tipo=devolvi&desde=2026-03-10&hasta=2026-03-10") })).toEqual(["b3", "b2-bis", "b2"]);
+    expect(await listed("desde=2026-03-12&hasta=2026-03-12")).toEqual({ items: [], page: 1, pageSize: 100, total: 0, totalPages: 0 });
+    const paged = (await get("/me/historial?desde=2026-03-10&hasta=2026-03-10&pageSize=2&page=2", 0)).data;
+    expect(paged).toMatchObject({ page: 2, pageSize: 2, total: 4, totalPages: 2 });
+    expect(idsOf({ data: paged })).toEqual(["b2-bis", "b2"]);
+  });
+
+  test("/alertas: ordena por alta e id, pagina en cinco páginas, cuenta sinLeer por alerta y excluye las ajenas", async () => {
+    const stamps = [0, 1, 2, 3, 3, 5, 5, 5, 8];
+    const fixture = stamps.map((n, i) => ({ id: `a-${i}`, createdAt: at(n), activa: i !== 6 }));
+    for (const a of fixture) {
+      db.insert(alerts).values({ id: a.id, userId: uid(0), clave: `clave-${a.id}`, activa: a.activa, createdAt: a.createdAt,
+        filtros: { situacion: "perdi", categoria: "Llaves", palabras: a.id, zona: "Palermo", periodo: "semana", ubicacion: null } }).run();
+    }
+    db.insert(alerts).values({ id: "ajena", userId: uid(1), clave: "ajena", createdAt: at(9),
+      filtros: { situacion: "perdi", categoria: "Llaves", palabras: "ajena", zona: "Palermo", periodo: "semana", ubicacion: null } }).run();
+    const note = (id: string, alertId: string, userId: string, read: boolean) =>
+      db.insert(notifications).values({ id, userId, tipo: "coincidencia", mensaje: `Aviso ${id}`, alertId, readAt: read ? nowIso() : null, createdAt: at(seq++) }).run();
+    for (const [i, read] of [[0, false], [1, false], [2, false], [3, true]] as const) note(`n8-${i}`, "a-8", uid(0), read);
+    note("n4-0", "a-4", uid(0), false);
+    note("n2-0", "a-2", uid(0), true); note("n2-1", "a-2", uid(0), true);
+    note("naj-0", "ajena", uid(1), false); note("naj-1", "ajena", uid(1), false);
+    const expected = descending(fixture, (a) => a.createdAt, (a) => a.id).map((a) => a.id);
+    expect(expected).toEqual(["a-8", "a-7", "a-6", "a-5", "a-4", "a-3", "a-2", "a-1", "a-0"]);
+    for (const size of [2, 4, 100]) expect(await walk("/alertas", 0, size, 9)).toEqual(expected);
+    const all = (await get("/alertas?pageSize=100", 0)).data;
+    expect(Object.keys(all)).toEqual(["items", "page", "pageSize", "total", "totalPages"]);
+    expect(Object.keys(all.items[0])).toEqual(["id", "clave", "filtros", "activa", "creadaEn", "sinLeer"]);
+    expect(Object.fromEntries(all.items.map((x: any) => [x.id, x.sinLeer]))).toEqual({ "a-8": 3, "a-7": 0, "a-6": 0, "a-5": 0, "a-4": 1, "a-3": 0, "a-2": 0, "a-1": 0, "a-0": 0 });
+    expect(all.items.find((x: any) => x.id === "a-6")).toMatchObject({ activa: false, clave: "clave-a-6", creadaEn: at(5) });
+    expect(all.items[0].filtros).toMatchObject({ palabras: "a-8", categoria: "Llaves" });
+    // El conteo no depende de la página pedida y la cuenta ajena conserva el suyo.
+    expect((await get("/alertas?pageSize=1&page=9", 0)).data.items[0]).toMatchObject({ id: "a-0", sinLeer: 0 });
+    expect((await get("/alertas?pageSize=1", 0)).data.items[0]).toMatchObject({ id: "a-8", sinLeer: 3 });
+    expect((await get("/alertas", 1)).data.items.map((x: any) => [x.id, x.sinLeer])).toEqual([["ajena", 2]]);
+    expect((await api("/alertas/a-8/leida", "POST", undefined, accounts[0]!.token)).response.status).toBe(200);
+    expect((await get("/alertas?pageSize=1", 0)).data.items[0]).toMatchObject({ id: "a-8", sinLeer: 0 });
+    expect((await get("/alertas", 2)).data).toEqual({ items: [], page: 1, pageSize: 20, total: 0, totalPages: 0 });
+  });
+
+  test("/notificaciones: ordena por alta e id, pagina en cuatro páginas, sinLeer es global y las ajenas no aparecen", async () => {
+    insertPost({ id: "n-post", deletedAt: nowIso() });
+    db.insert(alerts).values({ id: "n-alert", userId: uid(2), clave: "n-alert", createdAt: at(0),
+      filtros: { situacion: "perdi", categoria: "Llaves", palabras: "", zona: "Palermo", periodo: "semana", ubicacion: null } }).run();
+    db.insert(claims).values({ id: "n-claim", publicationId: "n-post", userId: uid(2), mensaje: "Son mis llaves.", estado: "pendiente", createdAt: at(0), updatedAt: at(0) }).run();
+    const stamps = [0, 1, 2, 3, 3, 3, 6, 7, 8, 8, 10, 11, 12];
+    const fixture = stamps.map((n, i) => ({ id: `n-${String(i).padStart(2, "0")}`, createdAt: at(100 + n), read: i % 3 === 0 }));
+    for (const n of fixture) {
+      db.insert(notifications).values({ id: n.id, userId: uid(2), tipo: "publicacion", mensaje: `Aviso ${n.id}`, publicationId: "n-post", claimId: "n-claim", alertId: "n-alert",
+        readAt: n.read ? at(500) : null, createdAt: n.createdAt }).run();
+    }
+    for (const id of ["ajena-1", "ajena-2"]) db.insert(notifications).values({ id, userId: uid(1), tipo: "publicacion", mensaje: "No es tuyo", createdAt: at(1000) }).run();
+    const expected = descending(fixture, (n) => n.createdAt, (n) => n.id);
+    const unread = fixture.filter((n) => !n.read).length;
+    for (const size of [4, 5, 100]) expect(await walk("/notificaciones", 2, size, 13)).toEqual(expected.map((n) => n.id));
+    const first = (await get("/notificaciones?pageSize=2", 2)).data;
+    expect(Object.keys(first)).toEqual(["items", "page", "pageSize", "total", "totalPages", "sinLeer"]);
+    // sinLeer cuenta todas las notificaciones sin leer, no solo las de la página.
+    expect(first.sinLeer).toBe(unread);
+    expect((await get("/notificaciones?pageSize=2&page=7", 2)).data.sinLeer).toBe(unread);
+    expect((await get("/notificaciones?page=99", 2)).data).toEqual({ items: [], page: 99, pageSize: 20, total: 13, totalPages: 1, sinLeer: unread });
+    const item = (await get("/notificaciones?pageSize=100", 2)).data.items[0];
+    expect(item).toEqual({ id: expected[0]!.id, tipo: "publicacion", mensaje: `Aviso ${expected[0]!.id}`, publicacionId: "n-post", reclamoId: "n-claim",
+      alertaId: "n-alert", creadaEn: expected[0]!.createdAt, leidaEn: expected[0]!.read ? at(500) : null });
+    expect((await get("/notificaciones", 1)).data).toMatchObject({ total: 2, sinLeer: 2 });
+    expect((await get("/notificaciones", 0)).data).toEqual({ items: [], page: 1, pageSize: 20, total: 0, totalPages: 0, sinLeer: 0 });
+    const target = expected.find((n) => !n.read)!;
+    expect((await api(`/notificaciones/${target.id}/leida`, "POST", undefined, accounts[2]!.token)).response.status).toBe(200);
+    expect((await get("/notificaciones?pageSize=1", 2)).data.sinLeer).toBe(unread - 1);
+    expect((await api("/notificaciones/leidas", "POST", undefined, accounts[2]!.token)).response.status).toBe(200);
+    expect((await get("/notificaciones?pageSize=1", 2)).data).toMatchObject({ total: 13, sinLeer: 0 });
+  });
+
+  test("/notificaciones y /me/seguidas reconcilian los vencimientos antes de armar la página", async () => {
+    const id = insertPost({ id: "vence", updatedAt: at(900) });
+    db.insert(follows).values({ userId: uid(2), publicationId: id, createdAt: at(0) }).run();
+    for (let i = 0; i < 5; i++) db.insert(notifications).values({ id: `old-${i}`, userId: uid(2), tipo: "publicacion", mensaje: `Viejo ${i}`, createdAt: at(i) }).run();
+    db.update(posts).set({ venceAt: new Date(Date.now() - DAY).toISOString() }).where(eq(posts.id, id)).run();
+    // La primera respuesta ya incluye el aviso recién creado, primero en la página y contado en el total.
+    const first = (await get("/notificaciones?pageSize=2", 2)).data;
+    expect(first.items[0]).toMatchObject({ mensaje: "Venció: Publicación vence", publicacionId: id });
+    expect(first).toMatchObject({ total: 6, totalPages: 3, sinLeer: 6 });
+    expect((await get("/notificaciones", 2)).data.total).toBe(6);
+    // Las seguidas también reconcilian: el aviso borrado se vuelve a crear y la publicación figura como vencida.
+    db.delete(notifications).where(eq(notifications.mensaje, "Venció: Publicación vence")).run();
+    const followed = (await get("/me/seguidas", 2)).data;
+    expect(followed.items[0]).toMatchObject({ id, estado: "vencida" });
+    expect((await get("/notificaciones?pageSize=1", 2)).data.items[0]).toMatchObject({ mensaje: "Venció: Publicación vence" });
+  });
+
+  test("los cuatro listados validan la paginación y exigen sesión", async () => {
+    for (const path of ["/me/seguidas", "/me/historial", "/alertas", "/notificaciones"]) {
+      expect((await api(path)).response.status).toBe(401);
+      for (const bad of ["page=0", "page=-1", "page=1.5", "page=x", "pageSize=0", "pageSize=101", "pageSize=x", "page=1000001"]) {
+        const r = await get(`${path}?${bad}`, 2);
+        expect([path, bad, r.response.status]).toEqual([path, bad, 422]);
+        expect(r.data.error.code).toBe("INVALID_PAGINATION");
+      }
+      expect((await get(`${path}?page=1000000&pageSize=100`, 2)).response.status).toBe(200);
+    }
+    // En el historial el filtro inválido se informa antes que la paginación.
+    expect((await get("/me/historial?tipo=otro&page=0", 2)).data.error.code).toBe("INVALID_TYPE");
+    expect((await get("/me/historial?desde=no&page=0", 2)).data.error.code).toBe("INVALID_DATE_RANGE");
   });
 });
