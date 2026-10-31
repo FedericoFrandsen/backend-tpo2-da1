@@ -11,11 +11,40 @@ export const PUBLICATION_TTL_DAYS = 30;
 export const publicationExpiry = (desde = Date.now()) => new Date(desde + PUBLICATION_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 export const normalizeEmail = (email: string) => email.trim().toLowerCase();
 export const normalizeText = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-export function localDate(date = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: config.timeZone, year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(date);
+const dayFormatters = new Map<string, Intl.DateTimeFormat>();
+export function localDate(date = new Date(), timeZone: string = config.timeZone) {
+  let formatter = dayFormatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+    dayFormatters.set(timeZone, formatter);
+  }
+  const parts = formatter.formatToParts(date);
   return ["year", "month", "day"].map((p) => parts.find((v) => v.type === p)!.value).join("-");
+}
+const HOUR = 60 * 60 * 1000;
+/** Primer instante (ISO) cuya fecha local es `day` o posterior. Fuera de 1000..9999 no hay límite que aplicar a fechas ISO. */
+function localDayStartIso(day: string, timeZone: string) {
+  if (day < "1000-01-01" || day > "9999-12-31") return undefined;
+  const midnightUtc = Date.parse(`${day}T00:00:00Z`);
+  // Los husos van de UTC-12 a UTC+14: el inicio del día local cae siempre dentro de esta ventana (con margen para horario de verano).
+  let before = midnightUtc - 26 * HOUR, from = midnightUtc + 26 * HOUR;
+  while (from - before > 1) {
+    const middle = Math.floor((before + from) / 2);
+    if (localDate(new Date(middle), timeZone) >= day) from = middle; else before = middle;
+  }
+  return new Date(from).toISOString();
+}
+/**
+ * Convierte un rango de días locales inclusivo en límites de instante para comparar texto ISO en SQL:
+ * `from` es el primer instante de `desde` y `until` (exclusivo) el primero del día siguiente a `hasta`.
+ * Es equivalente a `localDate(resolvedAt)` entre `desde` y `hasta`, sin usar el día UTC.
+ */
+export function localDayBounds(desde?: string, hasta?: string, timeZone: string = config.timeZone) {
+  const next = hasta && new Date(Date.parse(`${hasta}T12:00:00Z`) + 24 * HOUR).toISOString().slice(0, 10);
+  return {
+    from: desde ? localDayStartIso(desde, timeZone) : undefined,
+    until: next ? localDayStartIso(next, timeZone) : undefined,
+  };
 }
 export function validDate(s: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;

@@ -10,7 +10,7 @@ import { createApp } from "../src/app";
 import { createDatabase } from "../src/database";
 import { createSession } from "../src/auth";
 import { alerts, claims, follows, halladoPublications as posts, halladoReviews, loginAttempts, notifications, otpCodes, sessions, thanks, users } from "../src/db/schema";
-import { localDate, nowIso } from "../src/utils";
+import { localDate, localDayBounds, nowIso } from "../src/utils";
 import { config } from "../src/config";
 import { sendOtp } from "../src/mailer";
 
@@ -1609,6 +1609,75 @@ describe("listados paginados: contrato", () => {
     expect(idsOf(await get("/me/seguidas?pageSize=100", 2))).toEqual(["t-0", "t-4", "t-3", "t-2", "t-1"]);
   });
 
+  test("/me/historial: reclamos no aceptados del mismo caso no duplican filas ni el total", async () => {
+    const [u0, u1, u2] = [uid(0), uid(1), uid(2)];
+    for (const id of ["m-1", "m-2"]) {
+      insertPost({ id, userId: u0, estado: "resuelta", resolvedAt: id === "m-1" ? "2026-03-02T15:00:00.000Z" : "2026-03-03T15:00:00.000Z" });
+      db.insert(claims).values({ id: `ok-${id}`, publicationId: id, userId: u1, mensaje: "Son mis llaves.", estado: "aceptado", createdAt: at(seq), updatedAt: at(seq) }).run();
+      for (const [n, estado] of [["a", "rechazado"], ["b", "cancelado"], ["c", "vencido"]] as const) {
+        db.insert(claims).values({ id: `${n}-${id}`, publicationId: id, userId: addUser(`${n}-${id}`), mensaje: "Son mis llaves.", estado, createdAt: at(seq), updatedAt: at(seq) }).run();
+      }
+    }
+    // Un reclamo ajeno aceptado no abre el caso a quien solo reclamó sin éxito.
+    expect(await walk("/me/historial", 0, 1, 2)).toEqual(["m-2", "m-1"]);
+    expect(await walk("/me/historial", 1, 1, 2)).toEqual(["m-2", "m-1"]);
+    expect((await get("/me/historial", 2)).data).toMatchObject({ items: [], total: 0, totalPages: 0 });
+    expect(await walk("/me/historial?tipo=devolvi", 0, 1, 2)).toEqual(["m-2", "m-1"]);
+    expect((await get("/me/historial?tipo=recupere", 0)).data.total).toBe(0);
+    void u2;
+  });
+
+  test("localDayBounds: el primer instante de cada día local, en varias zonas, con horario de verano y bordes", () => {
+    const iso = (t: number) => new Date(t).toISOString();
+    const zones = ["America/Argentina/Buenos_Aires", "UTC", "Asia/Tokyo", "America/New_York", "Pacific/Kiritimati", "Pacific/Pago_Pago", "Australia/Lord_Howe", "America/Sao_Paulo"];
+    const days = ["2018-11-03", "2018-11-04", "2018-11-05", "2026-03-07", "2026-03-08", "2026-03-09", "2026-04-04", "2026-04-05", "2026-10-03", "2026-10-04", "2026-11-01", "2026-12-31", "2027-01-01"];
+    for (const timeZone of zones) {
+      for (const day of days) {
+        const { from, until } = localDayBounds(day, day, timeZone);
+        // `from` es el primer instante de ese día local y `until` el primero del siguiente.
+        expect(localDate(new Date(Date.parse(from!) - 1), timeZone) < day).toBe(true);
+        expect(localDate(new Date(Date.parse(from!)), timeZone)).toBe(day);
+        expect(localDate(new Date(Date.parse(until!) - 1), timeZone)).toBe(day);
+        expect(localDate(new Date(Date.parse(until!)), timeZone) > day).toBe(true);
+        expect(from! < until!).toBe(true);
+      }
+    }
+    expect(localDayBounds("2026-01-20", "2026-01-20", "America/Argentina/Buenos_Aires")).toEqual({ from: "2026-01-20T03:00:00.000Z", until: "2026-01-21T03:00:00.000Z" });
+    expect(localDayBounds("2026-01-20", "2026-01-22", "UTC")).toEqual({ from: "2026-01-20T00:00:00.000Z", until: "2026-01-23T00:00:00.000Z" });
+    expect(localDayBounds("2026-01-20", "2026-01-20", "Asia/Tokyo")).toEqual({ from: "2026-01-19T15:00:00.000Z", until: "2026-01-20T15:00:00.000Z" });
+    // Nueva York: el día del cambio dura 23 horas (05:00Z a 04:00Z) y el siguiente empieza en horario de verano.
+    expect(localDayBounds("2026-03-08", "2026-03-08", "America/New_York")).toEqual({ from: "2026-03-08T05:00:00.000Z", until: "2026-03-09T04:00:00.000Z" });
+    expect(localDayBounds("2026-11-01", "2026-11-01", "America/New_York")).toEqual({ from: "2026-11-01T04:00:00.000Z", until: "2026-11-02T05:00:00.000Z" });
+    // São Paulo en 2018: a medianoche pasaba a 01:00, así que el día 04/11 empieza a la 01:00 local (03:00Z).
+    expect(localDayBounds("2018-11-04", "2018-11-04", "America/Sao_Paulo").from).toBe("2018-11-04T03:00:00.000Z");
+    // Sin rango no hay límite, y los extremos del calendario ISO no producen límites inválidos.
+    expect(localDayBounds(undefined, undefined)).toEqual({ from: undefined, until: undefined });
+    expect(localDayBounds("0001-01-01", "9999-12-31", "UTC")).toEqual({ from: undefined, until: undefined });
+    expect(iso(Date.parse(localDayBounds("9999-12-30", "9999-12-30", "UTC").until!))).toBe("9999-12-31T00:00:00.000Z");
+  });
+
+  test("/me/historial: el día local sigue la zona configurada, no la de Argentina ni UTC", async () => {
+    const [u0, u1] = [uid(0), uid(1)];
+    const put = (id: string, resolvedAt: string) => {
+      insertPost({ id, userId: u0, estado: "resuelta", resolvedAt });
+      db.insert(claims).values({ id: `claim-${id}`, publicationId: id, userId: u1, mensaje: "Son mis llaves.", estado: "aceptado", createdAt: at(seq), updatedAt: at(seq) }).run();
+    };
+    // Tokio es UTC+9: el 10/03 local empieza el 09/03 a las 15:00Z.
+    put("k1", "2026-03-09T14:59:59.999Z"); put("k2", "2026-03-09T15:00:00.000Z"); put("k3", "2026-03-10T14:59:59.999Z"); put("k4", "2026-03-10T15:00:00.000Z");
+    // Nueva York el 08/03/2026 pasa a horario de verano: el 08/03 local va de 05:00Z a 04:00Z del 09/03.
+    put("n1", "2026-03-08T04:59:59.999Z"); put("n2", "2026-03-08T05:00:00.000Z"); put("n3", "2026-03-09T03:59:59.999Z"); put("n4", "2026-03-09T04:00:00.000Z");
+    const only = async (qs: string) => idsOf(await get(`/me/historial?pageSize=100&${qs}`, 0));
+    (config as { timeZone: string }).timeZone = "Asia/Tokyo";
+    expect(await only("desde=2026-03-10&hasta=2026-03-10")).toEqual(["k3", "k2"]);
+    expect(await only("desde=2026-03-11&hasta=2026-03-11")).toEqual(["k4"]);
+    (config as { timeZone: string }).timeZone = "America/New_York";
+    expect(await only("desde=2026-03-08&hasta=2026-03-08")).toEqual(["n3", "n2"]);
+    expect(await only("desde=2026-03-09&hasta=2026-03-09")).toEqual(["k2", "k1", "n4"]);
+    expect(await only("hasta=2026-03-07")).toEqual(["n1"]);
+    (config as { timeZone: string }).timeZone = "UTC";
+    expect(await only("desde=2026-03-09&hasta=2026-03-09")).toEqual(["k2", "k1", "n4", "n3"]);
+  });
+
   describe("límites de consultas y filas materializadas", () => {
     type Statement = { sql: string; rows: number; params: unknown[] };
     const SIZES = [1, 20, 100];
@@ -1664,6 +1733,7 @@ describe("listados paginados: contrato", () => {
       (db.$client.query("EXPLAIN QUERY PLAN " + s.sql).all(...(s.params as any[])) as { detail: string }[]).map((r) => r.detail)).join("; ");
     // La consulta que lista cada página: ordena, y es la que debe llevar LIMIT.
     const followedPage = (s: Statement) => /from "hallado_follows" inner join "hallado_publications"/.test(s.sql) && /order by/i.test(s.sql);
+    const casesPage = (s: Statement) => /from "hallado_publications" inner join "hallado_claims"/.test(s.sql) && /order by/i.test(s.sql);
     const alertsPage = (s: Statement) => /from "hallado_alerts"/.test(s.sql) && /order by/i.test(s.sql);
     const notificationsPage = (s: Statement) => /from "hallado_notifications"/.test(s.sql) && /order by/i.test(s.sql);
     /** Una página posterior a la primera agrega OFFSET a la misma consulta, con un máximo de filas igual al tamaño. */
@@ -1704,6 +1774,37 @@ describe("listados paginados: contrato", () => {
       expect(plan).not.toMatch(/SCAN hallado_(follows|publications)/);
       const top = (await get("/me/seguidas?pageSize=3", 2)).data.items;
       expect(top.map((x: any) => [x.id, x.estado])).toEqual([["f-149", "vencida"], ["f-148", "abierta"], ["f-147", "abierta"]]);
+    });
+
+    test("/me/historial: filtra, cuenta y trae solo la página, y resuelve perfiles, valoraciones y agradecimientos en lote", async () => {
+      const [viewer, ...others] = [uid(0), uid(1), uid(2), ...Array.from({ length: 8 }, (_, n) => addUser(`peer-${n}`))];
+      for (let i = 0; i < 150; i++) {
+        const id = `c-${String(i).padStart(3, "0")}`, peer = others[i % others.length]!, mine = i % 2 === 0;
+        const resolvedAt = new Date(Date.UTC(2026, 0, 1, 12) + i * 5 * 3_600_000).toISOString();
+        insertPost({ id, userId: mine ? viewer : peer, tipo: i % 3 === 0 ? "perdido" : "encontrado", estado: "resuelta", resolvedAt });
+        db.insert(claims).values({ id: `cc-${i}`, publicationId: id, userId: mine ? peer : viewer, mensaje: "Son mis llaves.", estado: "aceptado", createdAt: at(i), updatedAt: at(i) }).run();
+        if (i % 3 === 0) db.insert(halladoReviews).values({ id: `rv-${i}`, publicationId: id, reviewerId: viewer, reviewedUserId: peer, positiva: i % 2 === 0, comentario: "", createdAt: nowIso() }).run();
+        if (i % 5 === 0) db.insert(thanks).values({ id: `th-${i}`, publicationId: id, authorId: viewer, recipientId: peer, mensaje: "Gracias", createdAt: nowIso() }).run();
+      }
+      const run = await bounded("/me/historial", 0, 150, 7);
+      for (const size of SIZES) {
+        const m = await run(size);
+        const page = m.statements.find(casesPage)!;
+        expect(page.sql).toMatch(/ limit \?/i);
+        expect(page.rows).toBe(size);
+      }
+      await expectOffset("/me/historial", 0, casesPage);
+      // Los filtros se aplican en SQL: con tipo y días acotados solo se materializan las filas que cumplen.
+      const filtered = await measure("/me/historial?tipo=devolvi&desde=2026-01-05&hasta=2026-01-06&pageSize=100", 0);
+      expect(filtered.data.total).toBe(filtered.data.items.length);
+      expect(filtered.data.total).toBeGreaterThan(0);
+      expect(filtered.data.total).toBeLessThan(10);
+      expect(filtered.maxRows).toBeLessThanOrEqual(filtered.data.total);
+      expect(filtered.rows).toBeLessThanOrEqual(5 * filtered.data.total + 4);
+      const page = filtered.statements.find(casesPage)!;
+      expect(page.sql).toMatch(/"resolved_at" >= \?/);
+      expect(page.sql).toMatch(/"resolved_at" < \?/);
+      expect(page.sql).toMatch(/CASE WHEN/i);
     });
 
     test("/alertas: pagina en SQL y cuenta sinLeer de la página con una sola consulta agrupada", async () => {

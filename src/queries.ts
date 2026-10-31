@@ -1,4 +1,5 @@
-import { and, count, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { union } from "drizzle-orm/sqlite-core";
 import type { Store } from "./database";
 import { alerts, claims, follows, halladoPublications as posts, halladoReviews, notifications, searchHistory, uploads, users } from "./db/schema";
 import { ApiError } from "./errors";
@@ -75,23 +76,42 @@ export function getClaim(db: Store, id: string) {
 export function acceptedClaim(db: Store, postId: string) {
   return db.select().from(claims).where(and(eq(claims.publicationId, postId), eq(claims.estado, "aceptado"))).get();
 }
-export function publicProfile(db: Store, userId: string) {
-  const u = db.select().from(users).where(eq(users.id, userId)).get();
-  if (!u) throw new ApiError(404, "USER_NOT_FOUND", "No encontramos el usuario");
-  const completedReturns = db.select({ id: posts.id }).from(posts)
-    .leftJoin(claims, and(eq(claims.publicationId, posts.id), eq(claims.estado, "aceptado")))
-    .where(and(eq(posts.estado, "resuelta"), or(eq(posts.userId, userId), eq(claims.userId, userId)))).all().length;
-  const received = db.select({ positiva: halladoReviews.positiva }).from(halladoReviews)
-    .where(eq(halladoReviews.reviewedUserId, userId)).all();
-  const reputation = {
-    completedReturns,
-    positiveReviews: received.filter((v) => v.positiva).length,
-    negativeReviews: received.filter((v) => !v.positiva).length,
-  };
+/**
+ * Perfiles públicos de varias personas con tres consultas, sin importar cuántas sean: usuarios, devoluciones
+ * (publicaciones resueltas propias o con reclamo aceptado, sin contar dos veces una misma publicación) y valoraciones recibidas.
+ */
+export function publicProfiles(db: Store, userIds: string[]) {
+  const ids = [...new Set(userIds)];
+  const profiles = new Map<string, ReturnType<typeof buildProfile>>();
+  if (!ids.length) return profiles;
+  const found = db.select().from(users).where(inArray(users.id, ids)).all();
+  const owned = db.select({ uid: posts.userId, pid: posts.id }).from(posts)
+    .where(and(eq(posts.estado, "resuelta"), inArray(posts.userId, ids)));
+  const claimed = db.select({ uid: claims.userId, pid: posts.id }).from(claims)
+    .innerJoin(posts, eq(posts.id, claims.publicationId))
+    .where(and(eq(posts.estado, "resuelta"), eq(claims.estado, "aceptado"), inArray(claims.userId, ids)));
+  const returns = union(owned, claimed).as("returns");
+  const completed = new Map(db.select({ uid: returns.uid, n: count() }).from(returns).groupBy(returns.uid).all().map((r) => [r.uid, r.n]));
+  const reviews = db.select({ uid: halladoReviews.reviewedUserId, positiva: halladoReviews.positiva, n: count() }).from(halladoReviews)
+    .where(inArray(halladoReviews.reviewedUserId, ids)).groupBy(halladoReviews.reviewedUserId, halladoReviews.positiva).all();
+  for (const u of found) {
+    const mine = reviews.filter((r) => r.uid === u.id);
+    profiles.set(u.id, buildProfile(u, completed.get(u.id) ?? 0,
+      mine.find((r) => r.positiva)?.n ?? 0, mine.find((r) => !r.positiva)?.n ?? 0));
+  }
+  return profiles;
+}
+function buildProfile(u: typeof users.$inferSelect, completedReturns: number, positiveReviews: number, negativeReviews: number) {
   const badges = completedReturns >= 5
     ? [{ id: "vecino-solidario", name: "Vecino solidario", description: "Por concretar 5 devoluciones." }]
     : [];
-  return { id: u.id, name: u.name, zone: u.zone, avatarUrl: u.avatarUrl, memberSince: u.createdAt, reputation, badges };
+  return { id: u.id, name: u.name, zone: u.zone, avatarUrl: u.avatarUrl, memberSince: u.createdAt,
+    reputation: { completedReturns, positiveReviews, negativeReviews }, badges };
+}
+export function publicProfile(db: Store, userId: string) {
+  const profile = publicProfiles(db, [userId]).get(userId);
+  if (!profile) throw new ApiError(404, "USER_NOT_FOUND", "No encontramos el usuario");
+  return profile;
 }
 export function privateProfile(db: Store, userId: string) {
   const u = db.select().from(users).where(eq(users.id, userId)).get()!;
