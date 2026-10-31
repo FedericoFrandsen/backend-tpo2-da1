@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { cpSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,7 +10,7 @@ import { createApp } from "../src/app";
 import { createDatabase } from "../src/database";
 import { createSession } from "../src/auth";
 import { alerts, claims, follows, halladoPublications as posts, halladoReviews, loginAttempts, notifications, otpCodes, sessions, thanks, users } from "../src/db/schema";
-import { localDate, localDayBounds, nowIso } from "../src/utils";
+import { distanceKm, localDate, localDayBounds, nowIso } from "../src/utils";
 import { config } from "../src/config";
 import { sendOtp } from "../src/mailer";
 
@@ -1851,5 +1851,257 @@ describe("listados paginados: contrato", () => {
       expect(plan).toContain("hallado_notificacion_usuario_idx (user_id=?)");
       expect(plan).not.toMatch(/SCAN hallado_notifications/);
     });
+  });
+});
+
+describe("alertas geográficas: coherencia entre búsqueda y alerta", () => {
+  // Reloj fijo (12:00 en Buenos Aires) y coordenadas deterministas: el origen es fijo y cada punto se
+  // desplaza hacia el norte una distancia exacta, así que su distancia al origen es conocida.
+  const ARGENTINA = "America/Argentina/Buenos_Aires";
+  const NOW = "2026-03-15T15:00:00.000Z";
+  const TODAY = "2026-03-15";
+  const ORIGIN = { latitud: -34.6, longitud: -58.4 };
+  /** Margen explícito a cada lado del borde, en km: mucho mayor que el error de punto flotante y mucho menor que cualquier radio probado. */
+  const MARGIN_KM = 0.001;
+  /** Margen para el borde exacto, en km: el radio se fija en la distancia calculada más o menos este valor. */
+  const EDGE_EPS_KM = 1e-9;
+  const [OWNER, SEEKER, OTHER] = [0, 1, 2];
+  const north = (km: number) => ({ latitud: ORIGIN.latitud + (km / 6371) * (180 / Math.PI), longitud: ORIGIN.longitud });
+  const token = (n: number) => accounts[n]!.token;
+  const tick = (ms = 60_000) => setSystemTime(new Date(Date.now() + ms));
+  const day = (offset: number) => localDate(new Date(Date.now() + offset * 86_400_000));
+  let zone: string;
+  beforeEach(() => { zone = config.timeZone; (config as { timeZone: string }).timeZone = ARGENTINA; setSystemTime(new Date(NOW)); });
+  afterEach(() => { setSystemTime(); (config as { timeZone: string }).timeZone = zone; });
+
+  const base = { situacion: "perdi", categoria: "Llaves", palabras: "", periodo: "semana" };
+  const gps = (radioKm?: number, extra: Record<string, unknown> = {}) =>
+    ({ ...base, ubicacion: ORIGIN, ...(radioKm === undefined ? {} : { radioKm }), ...extra });
+  const barrio = (zona: string, extra: Record<string, unknown> = {}) => ({ ...base, zona, ...extra });
+
+  const titles = new Map<string, string>();
+  beforeEach(() => titles.clear());
+  async function place(titulo: string, ubicacion: { latitud: number; longitud: number } | null, extra: Record<string, unknown> = {}, owner = OWNER) {
+    const created = await publish({ titulo, barrio: ubicacion ? "" : "Palermo", ...(ubicacion ? { ubicacion } : {}), fecha: TODAY, ...extra }, owner);
+    titles.set(created.id, titulo);
+    return created.id as string;
+  }
+  const named = (ids: string[]) => ids.map((id) => titles.get(id) ?? id).sort();
+  async function createAlert(filtros: Record<string, unknown>, who = SEEKER) {
+    const created = await api("/alertas", "POST", { filtros }, token(who));
+    expect(created.response.status).toBe(201);
+    return created.data as { id: string; filtros: Record<string, any> };
+  }
+  const setActive = async (id: string, activa: boolean, who = SEEKER) =>
+    expect((await api(`/alertas/${id}`, "PATCH", { activa }, token(who))).response.status).toBe(200);
+  const queryOf = (f: Record<string, any>) => {
+    const params = new URLSearchParams({ pageSize: "100" });
+    for (const [key, value] of Object.entries({ ...f, ubicacion: undefined, latitud: f.ubicacion?.latitud, longitud: f.ubicacion?.longitud })) {
+      if (value !== undefined && value !== "") params.set(key, String(value));
+    }
+    return `/publicaciones?${params}`;
+  };
+  /** Resultado de la búsqueda pública con los mismos filtros, en el mismo instante. */
+  async function searched(f: Record<string, any>, who = SEEKER) {
+    const result = await api(queryOf(f), "GET", undefined, token(who));
+    expect(result.response.status).toBe(200);
+    return result.data.items.map((x: any) => x.id) as string[];
+  }
+  /** Publicaciones por las que esta alerta generó avisos (repetidas si hubiera duplicados). */
+  async function notified(alertId: string, who = SEEKER) {
+    const result = (await api("/notificaciones?pageSize=100", "GET", undefined, token(who))).data;
+    return result.items.filter((n: any) => n.alertaId === alertId && n.tipo === "coincidencia").map((n: any) => n.publicacionId as string);
+  }
+  /** Una misma regla: lo que devuelve la búsqueda es lo que la alerta avisa, una sola vez cada publicación. */
+  async function expectCoherent(alertId: string, f: Record<string, any>, expected: string[], who = SEEKER) {
+    const fromSearch = await searched(f, who);
+    const fromAlert = await notified(alertId, who);
+    expect(named(fromSearch)).toEqual(expected.slice().sort());
+    expect(named(fromAlert)).toEqual(expected.slice().sort());
+    expect(new Set(fromAlert).size).toBe(fromAlert.length);
+  }
+
+  for (const modo of ["al publicar", "al reanudar"] as const) {
+    test(`radio mínimo, intermedio, máximo y borde exacto: búsqueda y alerta coinciden (${modo})`, async () => {
+      const edgeKm = 7.3;
+      const d = distanceKm(ORIGIN, north(edgeKm));
+      const inner = ["dentro 0.1", "fuera 0.1", "dentro 2.5", "fuera 2.5"];
+      const cases = [
+        { radio: 0.1, expected: ["dentro 0.1"] },
+        { radio: 2.5, expected: ["dentro 0.1", "fuera 0.1", "dentro 2.5"] },
+        { radio: 500, expected: [...inner, "borde 7.3", "dentro 500"] },
+        // El borde se incluye (<=): con el radio justo en la distancia, o apenas por encima, entra; apenas por debajo, no.
+        { radio: d, expected: [...inner, "borde 7.3"] },
+        { radio: d + EDGE_EPS_KM, expected: [...inner, "borde 7.3"] },
+        { radio: d - EDGE_EPS_KM, expected: inner },
+      ];
+      const alertas = [];
+      for (const c of cases) {
+        const alert = await createAlert(gps(c.radio));
+        expect(alert.filtros.radioKm).toBe(c.radio);
+        if (modo === "al reanudar") await setActive(alert.id, false);
+        alertas.push({ ...c, alert });
+      }
+      const points: [number, string][] = [[0.1 - MARGIN_KM, "dentro 0.1"], [0.1 + MARGIN_KM, "fuera 0.1"], [2.5 - MARGIN_KM, "dentro 2.5"],
+        [2.5 + MARGIN_KM, "fuera 2.5"], [edgeKm, "borde 7.3"], [500 - MARGIN_KM, "dentro 500"], [500 + MARGIN_KM, "fuera 500"]];
+      for (const [km, name] of points) await place(name, north(km));
+      if (modo === "al reanudar") { tick(); for (const a of alertas) await setActive(a.alert.id, true); }
+      for (const a of alertas) await expectCoherent(a.alert.id, gps(a.radio), a.expected);
+    });
+  }
+
+  test("radio inválido: 0.1 y 500 se aceptan; fuera de rango o no numérico se rechaza en búsqueda y alerta", async () => {
+    const search = (radioKm: string) => api(queryOf({ ...base, ubicacion: ORIGIN, radioKm }));
+    for (const ok of [0.1, 500]) {
+      const created = await api("/alertas", "POST", { filtros: gps(ok) }, token(SEEKER));
+      expect(created.response.status).toBe(201);
+      expect(created.data.filtros.radioKm).toBe(ok);
+      expect((await search(String(ok))).response.status).toBe(200);
+    }
+    for (const bad of [0.09, 0.0999999, 0, -1, 500.01, 1000]) {
+      expect((await api("/alertas", "POST", { filtros: gps(bad) }, token(SEEKER))).response.status).toBe(422);
+      const result = await search(String(bad));
+      expect(result.response.status).toBe(422);
+      expect(result.data.error.code).toBe("INVALID_RADIUS");
+    }
+    for (const bad of ["abc", "NaN"]) expect((await search(bad)).response.status).toBe(422);
+    // Las inválidas no dejaron alertas: solo las dos de los bordes.
+    expect((await api("/alertas", "GET", undefined, token(SEEKER))).data.total).toBe(2);
+  });
+
+  test("sin radio explícito se usa el de la API, igual en búsqueda y alerta, y no crea una alerta distinta", async () => {
+    const radio = config.searchRadiusKm;
+    const implicit = await createAlert(gps());
+    expect(implicit.filtros.radioKm).toBe(radio);
+    const explicit = await api("/alertas", "POST", { filtros: gps(radio) }, token(SEEKER));
+    expect(explicit.response.status).toBe(200);
+    expect(explicit.data.id).toBe(implicit.id);
+    await place("dentro", north(radio - MARGIN_KM));
+    await place("fuera", north(radio + MARGIN_KM));
+    await expectCoherent(implicit.id, gps(), ["dentro"]);
+  });
+
+  test("barrio es filtro textual: sin GPS ni radio; el mismo barrio lejos coincide y otro barrio cercano no", async () => {
+    const alert = await createAlert(barrio("PALERMO", { radioKm: 3 }));
+    // El radio no corresponde a un barrio: no se guarda y la alerta es la misma que sin radio.
+    expect(alert.filtros).not.toHaveProperty("radioKm");
+    expect(alert.filtros.ubicacion).toBeNull();
+    const same = await api("/alertas", "POST", { filtros: barrio("palermo") }, token(SEEKER));
+    expect(same.data.id).toBe(alert.id);
+    await place("palermo cerca", null);
+    await place("palermo lejos", north(300), { barrio: "Pálermo" });
+    await place("recoleta cerca", null, { barrio: "Recoleta" });
+    await expectCoherent(alert.id, barrio("PALERMO"), ["palermo cerca", "palermo lejos"]);
+  });
+
+  test("GPS ignora el barrio de la publicación: cualquier barrio dentro del radio coincide y el mismo barrio lejos no", async () => {
+    const alert = await createAlert(gps(5));
+    await place("otro barrio cerca", north(1), { barrio: "Recoleta" });
+    await place("mismo barrio cerca", north(2), { barrio: "Palermo" });
+    await place("mismo barrio lejos", north(50), { barrio: "Palermo" });
+    await expectCoherent(alert.id, gps(5), ["otro barrio cerca", "mismo barrio cerca"]);
+  });
+
+  test("cuentas distintas: cada una recibe solo lo suyo según su radio y nadie se avisa de sus propias publicaciones", async () => {
+    const owners = await createAlert(gps(1), OWNER);
+    const seeker = await createAlert(gps(1), SEEKER);
+    const wide = await createAlert(gps(10), OTHER);
+    const narrow = await createAlert(gps(1), OTHER);
+    await place("a 0.5 km", north(0.5));
+    await place("a 5 km", north(5));
+    await place("de la buscadora", north(0.2), {}, SEEKER);
+    expect(named(await notified(owners.id, OWNER))).toEqual(["de la buscadora"]);
+    expect(named(await notified(seeker.id, SEEKER))).toEqual(["a 0.5 km"]);
+    expect(named(await notified(wide.id, OTHER))).toEqual(["a 0.5 km", "a 5 km", "de la buscadora"]);
+    expect(named(await notified(narrow.id, OTHER))).toEqual(["a 0.5 km", "de la buscadora"]);
+    // Las alertas ajenas no se ven ni se modifican, y cada cuenta solo ve sus avisos.
+    expect((await api(`/alertas/${seeker.id}`, "PATCH", { activa: false }, token(OTHER))).response.status).toBe(404);
+    expect(await notified(seeker.id, OTHER)).toEqual([]);
+    expect((await api("/notificaciones", "GET", undefined, token(OWNER))).data.total).toBe(1);
+    expect((await api("/notificaciones", "GET", undefined, token(SEEKER))).data.total).toBe(1);
+    expect((await api("/notificaciones", "GET", undefined, token(OTHER))).data.total).toBe(5);
+  });
+
+  test("publicar y editar: entrar al radio avisa una vez; seguir editando, salir y volver a entrar no repite", async () => {
+    const alert = await createAlert(gps(2));
+    const id = await place("lejos al principio", north(2 + MARGIN_KM));
+    expect(await notified(alert.id)).toEqual([]);
+    const edit = (body: Record<string, unknown>) => api(`/publicaciones/${id}`, "PATCH", body, token(OWNER));
+    expect((await edit({ ubicacion: north(2 - MARGIN_KM) })).response.status).toBe(200);
+    expect(await notified(alert.id)).toEqual([id]);
+    await edit({ titulo: "Llaves editadas" });
+    expect(await notified(alert.id)).toEqual([id]);
+    await edit({ ubicacion: north(2 + MARGIN_KM) }); // sale del radio: lo ya avisado no se retira ni se repite
+    await edit({ ubicacion: north(2 - MARGIN_KM) });
+    await edit({ barrio: "Belgrano" }); // sin coordenadas nuevas se reubica en el barrio elegido
+    expect(await notified(alert.id)).toEqual([id]);
+    expect((await api("/notificaciones", "GET", undefined, token(SEEKER))).data.total).toBe(1);
+  });
+
+  test("pausa y reanudación: lo que ocurre en pausa se avisa al reanudar, una sola vez; vencidas, propias y anteriores no", async () => {
+    const before = await place("existía antes", north(1));
+    tick();
+    const alert = await createAlert(gps(3));
+    await setActive(alert.id, false);
+    tick();
+    await place("en pausa dentro", north(3 - MARGIN_KM));
+    await place("en pausa fuera", north(3 + MARGIN_KM));
+    const expired = await place("en pausa vencida", north(1));
+    db.update(posts).set({ venceAt: new Date(Date.now() - 86_400_000).toISOString() }).where(eq(posts.id, expired)).run();
+    await place("propia", north(1), {}, SEEKER);
+    expect(await notified(alert.id)).toEqual([]);
+    tick();
+    await setActive(alert.id, true);
+    expect(named(await notified(alert.id))).toEqual(["en pausa dentro"]);
+    // Pausar y reanudar otra vez, o reanudar sin cambios, no duplica.
+    await setActive(alert.id, true);
+    await setActive(alert.id, false);
+    await setActive(alert.id, true);
+    expect(named(await notified(alert.id))).toEqual(["en pausa dentro"]);
+    // La búsqueda ve lo anterior y lo propio (es pública y no es una novedad), pero no lo vencido.
+    expect(named(await searched(gps(3)))).toEqual(["en pausa dentro", "existía antes", "propia"]);
+    // Renovar la vencida la vuelve visible y avisa una vez; renovarla de nuevo no repite.
+    const renew = () => api(`/publicaciones/${expired}/renovar`, "POST", undefined, token(OWNER));
+    await renew();
+    expect(named(await notified(alert.id))).toEqual(["en pausa dentro", "en pausa vencida"]);
+    await renew();
+    expect(named(await notified(alert.id))).toEqual(["en pausa dentro", "en pausa vencida"]);
+    expect(await searched(gps(3))).toContain(expired);
+    void before;
+  });
+
+  test("lo anterior a la alerta figura en la búsqueda pero no en la alerta, ni al reanudarla; editarlo después sí lo avisa", async () => {
+    const old = await place("existía antes", north(1));
+    tick();
+    const alert = await createAlert(gps(3));
+    await setActive(alert.id, false);
+    await setActive(alert.id, true);
+    expect(await searched(gps(3))).toEqual([old]);
+    expect(await notified(alert.id)).toEqual([]);
+    tick();
+    await api(`/publicaciones/${old}`, "PATCH", { titulo: "Editada después" }, token(OWNER));
+    expect(await notified(alert.id)).toEqual([old]);
+  });
+
+  test("el período relativo se evalúa al momento del evento; el rango fijo no se desplaza", async () => {
+    const relative = [{ periodo: "hoy", name: "hoy" }, { periodo: "tresDias", name: "tres días" }, { periodo: "semana", name: "semana" }];
+    const alerts: Record<string, { id: string }> = {};
+    for (const r of relative) alerts[r.periodo] = await createAlert(gps(5, { periodo: r.periodo }));
+    const fixed = gps(5, { periodo: "rango", desde: day(-10), hasta: day(-8) });
+    alerts.rango = await createAlert(fixed);
+    for (const offset of [0, 2, 3, 6, 7, 9]) await place(`hace ${offset}`, north(1), { fecha: day(-offset) });
+    await expectCoherent(alerts.hoy!.id, gps(5, { periodo: "hoy" }), ["hace 0"]);
+    await expectCoherent(alerts.tresDias!.id, gps(5, { periodo: "tresDias" }), ["hace 0", "hace 2"]);
+    await expectCoherent(alerts.semana!.id, gps(5, { periodo: "semana" }), ["hace 0", "hace 2", "hace 3", "hace 6"]);
+    await expectCoherent(alerts.rango!.id, fixed, ["hace 9"]);
+    // Dos días después: «hoy» y «semana» se corren con el reloj, el rango no. Lo ya avisado se conserva.
+    tick(2 * 86_400_000);
+    await place("nuevo de hoy", north(1), { fecha: day(0) });
+    await place("nuevo dentro del rango", north(1), { fecha: day(-11) });
+    expect(named(await searched(gps(5, { periodo: "hoy" })))).toEqual(["nuevo de hoy"]);
+    expect(named(await notified(alerts.hoy!.id))).toEqual(["hace 0", "nuevo de hoy"]);
+    expect(named(await searched(gps(5, { periodo: "semana" })))).toEqual(["hace 0", "hace 2", "hace 3", "nuevo de hoy"]);
+    expect(named(await searched(fixed))).toEqual(["hace 9", "nuevo dentro del rango"]);
+    expect(named(await notified(alerts.rango!.id))).toEqual(["hace 9", "nuevo dentro del rango"]);
   });
 });
