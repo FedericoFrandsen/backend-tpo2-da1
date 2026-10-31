@@ -4,7 +4,7 @@ import { optionalUser, requireUser } from "../auth";
 import type { AppDatabase } from "../database";
 import { claims, follows, halladoPublications as posts } from "../db/schema";
 import { ApiError } from "../errors";
-import { expirePendingClaims, filtersFromQuery, getPost, isExpired, notify, notifyFollowers, notifyMatches, ownerPost, postEstado, preparePublication, rememberSearch, searchOrigin, searchPosts, serializePost } from "../queries";
+import { expirePendingClaims, filtersFromQuery, getPost, isExpired, notify, notifyExpiry, notifyFollowers, notifyMatches, notifyRenewal, ownerPost, postEstado, preparePublication, reconcileFollowedExpiries, rememberSearch, searchOrigin, searchPosts, serializePost } from "../queries";
 import { CATEGORIES, publicationBody, ZONES } from "../types";
 import { nowIso, paginate, publicationExpiry } from "../utils";
 
@@ -30,7 +30,9 @@ export function publicationRoutes(db: AppDatabase) {
     .get("/publicaciones/:id", async ({ params, headers }) => {
       const user = await optionalUser(db, headers);
       expirePendingClaims(db);
-      return serializePost(db, getPost(db, params.id), user?.id, true);
+      const post = getPost(db, params.id);
+      db.transaction((tx) => notifyExpiry(tx, post));
+      return serializePost(db, post, user?.id, true);
     })
     .get("/mis-publicaciones", async ({ headers, query }) => {
       const user = await requireUser(db, headers);
@@ -83,9 +85,14 @@ export function publicationRoutes(db: AppDatabase) {
       db.transaction((tx) => {
         const p = ownerPost(tx, params.id, user.id);
         if (p.estado === "resuelta") throw new ApiError(409, "PUBLICATION_LOCKED", "No podés renovar una publicación resuelta");
+        // Solo hay transición real si estaba vencida: primero se deja el aviso del ciclo que se cierra y luego el de la renovación.
+        const wasExpired = isExpired(tx, p);
+        if (wasExpired) notifyExpiry(tx, p);
         tx.update(posts).set({ venceAt: publicationExpiry(), updatedAt: nowIso() }).where(eq(posts.id, p.id)).run();
+        const renewed = getPost(tx, p.id);
+        if (wasExpired) notifyRenewal(tx, p, renewed);
         // Si estaba vencida vuelve a ser visible: se avisa a las alertas que coinciden (deduplicadas).
-        notifyMatches(tx, getPost(tx, p.id));
+        notifyMatches(tx, renewed);
       });
       return serializePost(db, getPost(db, params.id), user.id, true);
     })
@@ -119,6 +126,7 @@ export function publicationRoutes(db: AppDatabase) {
     })
     .get("/me/seguidas", async ({ headers, query }) => {
       const user = await requireUser(db, headers);
+      db.transaction((tx) => reconcileFollowedExpiries(tx, user.id));
       const ids = db.select().from(follows).where(eq(follows.userId, user.id)).all();
       const items = ids.map((f) => db.select().from(posts).where(and(eq(posts.id, f.publicationId), isNull(posts.deletedAt))).get())
         .filter((p): p is NonNullable<typeof p> => !!p).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));

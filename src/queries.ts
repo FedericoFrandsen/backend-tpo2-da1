@@ -340,9 +340,39 @@ export function notify(db: Store, userId: string, tipo: string, mensaje: string,
   db.insert(notifications).values({ id: crypto.randomUUID(), userId, tipo, mensaje, ...data, createdAt: nowIso() })
     .onConflictDoNothing().run();
 }
-export function notifyFollowers(db: Store, post: Post, mensaje: string) {
+/** Con `dedupeKey` el aviso es único por seguidor: repetirlo con la misma clave no vuelve a notificar. */
+export function notifyFollowers(db: Store, post: Post, mensaje: string, dedupeKey?: string) {
   for (const f of db.select().from(follows).where(eq(follows.publicationId, post.id)).all()) {
-    if (f.userId !== post.userId) notify(db, f.userId, "publicacion", mensaje, { publicationId: post.id });
+    if (f.userId !== post.userId) notify(db, f.userId, "publicacion", mensaje, { publicationId: post.id, ...(dedupeKey ? { dedupeKey: `${dedupeKey}:${f.userId}` } : {}) });
+  }
+}
+/**
+ * El ciclo de vencimiento se identifica por el `venceAt` que lo cerró: renovar lo reemplaza, así que cada ciclo
+ * tiene una clave propia y un mismo ciclo nunca avisa dos veces al mismo seguidor (sin guardar estado extra).
+ */
+const expiryKey = (p: Post) => `vence:${p.id}:${p.venceAt}`;
+const renewalKey = (p: Post) => `renueva:${p.id}:${p.venceAt}`;
+/** Avisa a los seguidores que el ciclo vigente venció. Idempotente: no hace nada si la publicación no está vencida. */
+export function notifyExpiry(db: Store, post: Post) {
+  if (isExpired(db, post)) notifyFollowers(db, post, `Venció: ${post.titulo}`, expiryKey(post));
+}
+/** Avisa la renovación solo si `before` estaba realmente vencida; usa el ciclo que se cerró como clave. */
+export function notifyRenewal(db: Store, before: Post, after: Post) {
+  notifyFollowers(db, after, `Se renovó: ${after.titulo}`, renewalKey(before));
+}
+/**
+ * Reconcilia los vencimientos de lo que sigue una persona. Los candidatos salen de sus seguimientos (índice por usuario),
+ * se limitan a abiertas ya pasadas de `venceAt` y se descartan las que ya tienen el aviso de ese ciclo.
+ */
+export function reconcileFollowedExpiries(db: Store, userId: string) {
+  const candidates = db.select({ post: posts }).from(follows).innerJoin(posts, eq(posts.id, follows.publicationId))
+    .where(and(eq(follows.userId, userId), isNull(posts.deletedAt), eq(posts.estado, "abierta"),
+      sql`${posts.venceAt} > ''`, lte(posts.venceAt, nowIso()),
+      sql`NOT EXISTS (SELECT 1 FROM hallado_notifications WHERE dedupe_key = 'vence:' || ${posts.id} || ':' || ${posts.venceAt} || ':' || ${userId})`)).all();
+  for (const { post } of candidates) {
+    if (post.userId !== userId && isExpired(db, post)) {
+      notify(db, userId, "publicacion", `Venció: ${post.titulo}`, { publicationId: post.id, dedupeKey: `${expiryKey(post)}:${userId}` });
+    }
   }
 }
 export function notifyMatches(db: Store, post: Post) {
