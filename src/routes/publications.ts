@@ -1,12 +1,12 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { optionalUser, requireUser } from "../auth";
 import type { AppDatabase } from "../database";
 import { claims, follows, halladoPublications as posts } from "../db/schema";
 import { ApiError } from "../errors";
-import { expirePendingClaims, filtersFromQuery, getPost, isExpired, notify, notifyExpiry, notifyFollowers, notifyMatches, notifyRenewal, ownerPost, postEstado, preparePublication, reconcileFollowedExpiries, rememberSearch, searchOrigin, searchPosts, serializePost } from "../queries";
+import { expirePendingClaims, filtersFromQuery, getPost, isExpired, notify, notifyExpiry, notifyFollowers, notifyMatches, notifyRenewal, ownerPost, postEstado, preparePublication, reconcileFollowedExpiries, rememberSearch, searchOrigin, searchPosts, serializePost, serializeSummaries } from "../queries";
 import { CATEGORIES, publicationBody, ZONES } from "../types";
-import { nowIso, paginate, publicationExpiry } from "../utils";
+import { nowIso, pageResult, pageWindow, paginate, publicationExpiry } from "../utils";
 
 export function publicationRoutes(db: AppDatabase) {
   return new Elysia()
@@ -126,11 +126,14 @@ export function publicationRoutes(db: AppDatabase) {
     })
     .get("/me/seguidas", async ({ headers, query }) => {
       const user = await requireUser(db, headers);
+      const window = pageWindow(query);
+      // Primero se reconcilian los vencimientos: los avisos nuevos y el estado de la página salen de la misma lectura.
       db.transaction((tx) => reconcileFollowedExpiries(tx, user.id));
-      const ids = db.select().from(follows).where(eq(follows.userId, user.id)).all();
-      const items = ids.map((f) => db.select().from(posts).where(and(eq(posts.id, f.publicationId), isNull(posts.deletedAt))).get())
-        .filter((p): p is NonNullable<typeof p> => !!p).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-      const page = paginate(items, query);
-      return { ...page, items: page.items.map((p) => serializePost(db, p, user.id)) };
+      // El seguimiento es único por (publicación, persona): el join no duplica filas ni altera el total.
+      const followed = and(eq(follows.userId, user.id), isNull(posts.deletedAt));
+      const total = db.select({ n: count() }).from(follows).innerJoin(posts, eq(posts.id, follows.publicationId)).where(followed).get()!.n;
+      const rows = db.select({ post: posts }).from(follows).innerJoin(posts, eq(posts.id, follows.publicationId)).where(followed)
+        .orderBy(desc(posts.updatedAt), desc(posts.id)).limit(window.pageSize).offset(window.offset).all();
+      return pageResult(serializeSummaries(db, rows.map((r) => r.post)), window, total);
     });
 }

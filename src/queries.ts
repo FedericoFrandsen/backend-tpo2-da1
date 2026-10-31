@@ -39,6 +39,22 @@ export function isExpired(db: Store, p: Post): boolean {
     .where(and(eq(claims.publicationId, p.id), eq(claims.estado, "pendiente"), gt(claims.updatedAt, cutoff))).get();
 }
 export const postEstado = (db: Store, p: Post) => (isExpired(db, p) ? "vencida" as const : p.estado);
+/**
+ * Estado derivado de un lote de publicaciones con a lo sumo una consulta (los reclamos vigentes de las vencibles),
+ * en lugar de una por fila. Aplica la misma regla que `isExpired`.
+ */
+export function postEstados(db: Store, list: Post[]) {
+  const now = nowIso();
+  const due = list.filter((p) => p.estado === "abierta" && p.venceAt && p.venceAt <= now);
+  const held = new Set<string>();
+  if (due.length) {
+    const cutoff = new Date(Date.now() - CLAIM_EXPIRATION_MS).toISOString();
+    for (const c of db.select({ id: claims.publicationId }).from(claims)
+      .where(and(inArray(claims.publicationId, due.map((p) => p.id)), eq(claims.estado, "pendiente"), gt(claims.updatedAt, cutoff))).all()) held.add(c.id);
+  }
+  const dueIds = new Set(due.map((p) => p.id));
+  return new Map(list.map((p) => [p.id, dueIds.has(p.id) && !held.has(p.id) ? "vencida" as const : p.estado]));
+}
 
 export function getPost(db: Store, id: string) {
   const post = db.select().from(posts).where(and(eq(posts.id, id), isNull(posts.deletedAt))).get();
@@ -86,11 +102,11 @@ export function privateProfile(db: Store, userId: string) {
  * no consulta reputación, reclamos, seguimiento ni valoraciones, que únicamente usa el detalle.
  * No ejecuta `expirePendingClaims`: la salida no depende de él y quien serializa en lote lo llama una sola vez.
  */
-export function serializePost(db: Store, p: Post, viewerId?: string, detail = false) {
+export function serializePost(db: Store, p: Post, viewerId?: string, detail = false, estado = postEstado(db, p)) {
   const summary = {
     id: p.id, tipo: p.tipo, titulo: p.titulo, descripcion: p.descripcion,
     categoria: p.categoria, barrio: p.barrio, fecha: p.fecha, franja: p.franja,
-    estado: postEstado(db, p),
+    estado,
   };
   const dates = { creadaEn: p.createdAt, actualizadaEn: p.updatedAt, resueltaEn: p.resolvedAt, venceAt: p.venceAt || null };
   const coarse = (n: number) => Math.round(n * 1000) / 1000;
@@ -133,6 +149,11 @@ export function serializePost(db: Store, p: Post, viewerId?: string, detail = fa
     valoracion: viewerId ? db.select({ id: halladoReviews.id, positiva: halladoReviews.positiva, comentario: halladoReviews.comentario })
       .from(halladoReviews).where(and(eq(halladoReviews.publicationId, p.id), eq(halladoReviews.reviewerId, viewerId))).get() ?? null : null,
   };
+}
+/** Resúmenes de un listado: el estado derivado de toda la página se resuelve en lote, sin una consulta por publicación. */
+export function serializeSummaries(db: Store, list: Post[]) {
+  const estados = postEstados(db, list);
+  return list.map((p) => serializePost(db, p, undefined, false, estados.get(p.id)));
 }
 export function serializeClaim(db: Store, claim: Claim, post: Post, viewerId: string) {
   const u = db.select().from(users).where(eq(users.id, claim.userId)).get()!;
@@ -209,15 +230,18 @@ export function matchesPost(p: Post, f: SearchFilters) {
 }
 /** Coincide con los filtros y sigue vigente: las vencidas no aparecen en búsquedas ni disparan alertas. */
 export const matchesLive = (db: Store, p: Post, f: SearchFilters) => matchesPost(p, f) && !isExpired(db, p);
+/** Reclamo pendiente vigente (48 h) que sostiene a la publicación y le impide vencer: la regla de `isExpired` en SQL. */
+function heldByClaim() {
+  const cutoff = new Date(Date.now() - CLAIM_EXPIRATION_MS).toISOString();
+  return sql`EXISTS (SELECT 1 FROM hallado_claims WHERE hallado_claims.publication_id = hallado_publications.id
+    AND hallado_claims.estado = 'pendiente' AND hallado_claims.updated_at > ${cutoff})`;
+}
 /**
  * Equivalente SQL de `!isExpired` para publicaciones abiertas: sin `venceAt`, con `venceAt` futuro
  * o con un reclamo pendiente vigente (48 h) que la sostiene.
  */
 function liveCondition() {
-  const cutoff = new Date(Date.now() - CLAIM_EXPIRATION_MS).toISOString();
-  return sql`(${posts.venceAt} IS NULL OR ${posts.venceAt} = '' OR ${posts.venceAt} > ${nowIso()} OR EXISTS (
-    SELECT 1 FROM hallado_claims WHERE hallado_claims.publication_id = hallado_publications.id
-      AND hallado_claims.estado = 'pendiente' AND hallado_claims.updated_at > ${cutoff}))`;
+  return sql`(${posts.venceAt} IS NULL OR ${posts.venceAt} = '' OR ${posts.venceAt} > ${nowIso()} OR ${heldByClaim()})`;
 }
 /** Caja de latitud/longitud que contiene el círculo del radio (con margen mínimo); el filtro exacto sigue siendo `distanceKm`. */
 function boundingBox(o: { latitud: number; longitud: number }, radioKm: number) {
@@ -362,15 +386,16 @@ export function notifyRenewal(db: Store, before: Post, after: Post) {
 }
 /**
  * Reconcilia los vencimientos de lo que sigue una persona. Los candidatos salen de sus seguimientos (índice por usuario),
- * se limitan a abiertas ya pasadas de `venceAt` y se descartan las que ya tienen el aviso de ese ciclo.
+ * se limitan a abiertas ya pasadas de `venceAt`, sin un reclamo vigente que las sostenga (regla de `isExpired`, resuelta
+ * en la misma consulta para no consultar por publicación) y se descartan las que ya tienen el aviso de ese ciclo.
  */
 export function reconcileFollowedExpiries(db: Store, userId: string) {
   const candidates = db.select({ post: posts }).from(follows).innerJoin(posts, eq(posts.id, follows.publicationId))
     .where(and(eq(follows.userId, userId), isNull(posts.deletedAt), eq(posts.estado, "abierta"),
-      sql`${posts.venceAt} > ''`, lte(posts.venceAt, nowIso()),
+      sql`${posts.venceAt} > ''`, lte(posts.venceAt, nowIso()), sql`NOT ${heldByClaim()}`,
       sql`NOT EXISTS (SELECT 1 FROM hallado_notifications WHERE dedupe_key = 'vence:' || ${posts.id} || ':' || ${posts.venceAt} || ':' || ${userId})`)).all();
   for (const { post } of candidates) {
-    if (post.userId !== userId && isExpired(db, post)) {
+    if (post.userId !== userId) {
       notify(db, userId, "publicacion", `Venció: ${post.titulo}`, { publicationId: post.id, dedupeKey: `${expiryKey(post)}:${userId}` });
     }
   }

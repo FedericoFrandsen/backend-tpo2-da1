@@ -43,6 +43,15 @@ export function pageOptions(q: Record<string, string | undefined>) {
   };
   return { page: read("page", 1, 1_000_000), pageSize: read("pageSize", 20, 100) };
 }
+/** Ventana de una página: la consulta SQL usa `pageSize` como LIMIT y `offset` como OFFSET. */
+export function pageWindow(q: Record<string, string | undefined>) {
+  const { page, pageSize } = pageOptions(q);
+  return { page, pageSize, offset: (page - 1) * pageSize };
+}
+/** Respuesta paginada de una página ya resuelta en SQL; `total` es el conteo de todo el listado. */
+export function pageResult<T>(items: T[], { page, pageSize }: { page: number; pageSize: number }, total: number) {
+  return { items, page, pageSize, total, totalPages: Math.ceil(total / pageSize) };
+}
 export function paginate<T>(items: T[], q: Record<string, string | undefined>) {
   const { page, pageSize } = pageOptions(q);
   return {

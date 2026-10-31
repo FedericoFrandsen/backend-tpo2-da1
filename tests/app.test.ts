@@ -1592,4 +1592,117 @@ describe("listados paginados: contrato", () => {
     expect((await get("/me/historial?tipo=otro&page=0", 2)).data.error.code).toBe("INVALID_TYPE");
     expect((await get("/me/historial?desde=no&page=0", 2)).data.error.code).toBe("INVALID_DATE_RANGE");
   });
+
+  test("/me/seguidas: con la misma actualización desempata por id descendente en todas las páginas", async () => {
+    const stamp = at(500);
+    // Se siguen en orden ascendente de id: el orden de seguimiento no decide el desempate.
+    for (const id of ["t-1", "t-2", "t-3", "t-4", "t-5"]) {
+      insertPost({ id, updatedAt: stamp });
+      db.insert(follows).values({ userId: uid(2), publicationId: id, createdAt: at(seq++) }).run();
+    }
+    insertPost({ id: "t-0", updatedAt: at(501) });
+    db.insert(follows).values({ userId: uid(2), publicationId: "t-0", createdAt: at(seq++) }).run();
+    expect(await walk("/me/seguidas", 2, 2, 6)).toEqual(["t-0", "t-5", "t-4", "t-3", "t-2", "t-1"]);
+    // Dejar de seguir saca la publicación del listado y del total.
+    expect((await api("/publicaciones/t-5/seguir", "DELETE", undefined, accounts[2]!.token)).response.status).toBe(200);
+    expect((await get("/me/seguidas?pageSize=2", 2)).data).toMatchObject({ total: 5, totalPages: 3 });
+    expect(idsOf(await get("/me/seguidas?pageSize=100", 2))).toEqual(["t-0", "t-4", "t-3", "t-2", "t-1"]);
+  });
+
+  describe("límites de consultas y filas materializadas", () => {
+    type Statement = { sql: string; rows: number; params: unknown[] };
+    const SIZES = [1, 20, 100];
+    const WRITE = /^\s*(insert|update|delete|replace|create|drop|alter)/i;
+
+    /** Ejecuta la request registrando cada consulta SQL y las filas que SQLite entrega a la aplicación. */
+    async function measure(path: string, account: number) {
+      const statements: Statement[] = [];
+      const original = db.$client.query.bind(db.$client);
+      (db.$client as any).query = (text: string) => {
+        const statement: any = original(text);
+        return new Proxy(statement, {
+          get(target, prop) {
+            const value = target[prop];
+            if (typeof value !== "function") return value;
+            if (prop === "all" || prop === "values") return (...args: unknown[]) => { const rows = value.apply(target, args); statements.push({ sql: text, rows: rows.length, params: args }); return rows; };
+            if (prop === "get") return (...args: unknown[]) => { const row = value.apply(target, args); statements.push({ sql: text, rows: row == null ? 0 : 1, params: args }); return row; };
+            if (prop === "run") return (...args: unknown[]) => { statements.push({ sql: text, rows: 0, params: args }); return value.apply(target, args); };
+            return value.bind(target);
+          },
+        });
+      };
+      try {
+        const result = await get(path, account);
+        // La autenticación (una consulta a sesiones y usuarios) es la misma para cualquier tamaño y queda fuera del conteo.
+        const counted = statements.filter((s) => !/"sessions"/i.test(s.sql));
+        expect(statements.length - counted.length).toBe(1);
+        return { ...result, statements: counted, rows: counted.reduce((n, s) => n + s.rows, 0), maxRows: Math.max(0, ...counted.map((s) => s.rows)) };
+      } finally { (db.$client as any).query = original; }
+    }
+    /** Mide los tamaños 1/20/100 y exige consultas acotadas, iguales entre tamaños y filas proporcionales a la página. */
+    async function bounded(path: string, account: number, total: number, maxStatements: number) {
+      await get(`${path}${path.includes("?") ? "&" : "?"}pageSize=1`, account); // las escrituras de reconciliación se hacen una sola vez
+      const counts: number[] = [];
+      for (const size of SIZES) {
+        const m = await measure(`${path}${path.includes("?") ? "&" : "?"}pageSize=${size}`, account);
+        expect(m.response.status).toBe(200);
+        expect(m.data.items).toHaveLength(Math.min(size, total));
+        expect(m.data.total).toBe(total);
+        expect(m.statements.filter((s) => WRITE.test(s.sql))).toEqual([]);
+        expect(m.statements.length).toBeLessThanOrEqual(maxStatements);
+        // Ninguna consulta entrega más filas que la página, y el total materializado crece con ella, no con los datos.
+        expect(m.maxRows).toBeLessThanOrEqual(size);
+        expect(m.rows).toBeLessThanOrEqual(5 * size + 4);
+        counts.push(m.statements.length);
+      }
+      expect(new Set(counts).size).toBe(1);
+      return (size: number) => measure(`${path}${path.includes("?") ? "&" : "?"}pageSize=${size}`, account);
+    }
+
+    /** Plan de ejecución de SQLite de las consultas medidas: cada línea es un paso, por ejemplo «SEARCH tabla USING INDEX ...». */
+    const planOf = (statements: Statement[]) => statements.flatMap((s) =>
+      (db.$client.query("EXPLAIN QUERY PLAN " + s.sql).all(...(s.params as any[])) as { detail: string }[]).map((r) => r.detail)).join("; ");
+    // La consulta que lista cada página: ordena, y es la que debe llevar LIMIT.
+    const followedPage = (s: Statement) => /from "hallado_follows" inner join "hallado_publications"/.test(s.sql) && /order by/i.test(s.sql);
+    /** Una página posterior a la primera agrega OFFSET a la misma consulta, con un máximo de filas igual al tamaño. */
+    async function expectOffset(path: string, account: number, isPage: (s: Statement) => boolean) {
+      const m = await measure(`${path}?page=2&pageSize=20`, account);
+      const page = m.statements.find(isPage)!;
+      expect(page.sql).toMatch(/ limit \? offset \?/i);
+      expect(page.rows).toBe(20);
+    }
+
+    test("/me/seguidas: reconcilia, cuenta y trae solo la página, con estados derivados en lote", async () => {
+      for (let i = 0; i < 150; i++) {
+        const id = `f-${String(i).padStart(3, "0")}`;
+        insertPost({ id, updatedAt: at(2000 + i) });
+        db.insert(follows).values({ userId: uid(2), publicationId: id, createdAt: at(i) }).run();
+      }
+      // Las más recientes están vencidas; dos las sostiene un reclamo vigente y otras quedan fuera de la primera página.
+      for (const i of [149, 148, 147, 140, 130, 120, 100, 60, 20, 0]) {
+        db.update(posts).set({ venceAt: new Date(Date.now() - DAY).toISOString() }).where(eq(posts.id, `f-${String(i).padStart(3, "0")}`)).run();
+      }
+      for (const i of [148, 147]) {
+        db.insert(claims).values({ id: `pc-${i}`, publicationId: `f-${i}`, userId: uid(0), mensaje: "Son mis llaves.", estado: "pendiente", createdAt: nowIso(), updatedAt: nowIso() }).run();
+      }
+      const run = await bounded("/me/seguidas", 2, 150, 4);
+      for (const size of SIZES) {
+        const m = await run(size);
+        const page = m.statements.find(followedPage)!;
+        expect(page.sql).toMatch(/ limit \?/i);
+        expect(page.sql).toMatch(/"deleted_at" is null/);
+        expect(page.rows).toBe(size);
+        // Reputación, valoraciones y notificaciones no se consultan por fila; el estado vencido sale de una sola consulta por lote.
+        expect(m.statements.filter((s) => /hallado_reviews|users/.test(s.sql))).toEqual([]);
+        expect(m.statements.filter((s) => /from "hallado_claims"/.test(s.sql))).toHaveLength(1);
+      }
+      await expectOffset("/me/seguidas", 2, followedPage);
+      const plan = planOf((await run(20)).statements);
+      expect(plan).toContain("SEARCH hallado_follows USING INDEX hallado_seguimiento_usuario_idx (user_id=?)");
+      expect(plan).not.toMatch(/SCAN hallado_(follows|publications)/);
+      const top = (await get("/me/seguidas?pageSize=3", 2)).data.items;
+      expect(top.map((x: any) => [x.id, x.estado])).toEqual([["f-149", "vencida"], ["f-148", "abierta"], ["f-147", "abierta"]]);
+    });
+
+  });
 });
