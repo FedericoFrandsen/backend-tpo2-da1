@@ -227,6 +227,11 @@ export function filtersFromQuery(q: Record<string, string | undefined>) {
     radioKm: q.radioKm === undefined ? undefined : Number(q.radioKm),
   } as SearchFilters);
 }
+/**
+ * Fechas que cubre un período. Los relativos (hoy, tres días, semana) se calculan al momento de evaluar: en una búsqueda,
+ * ahora; en una alerta, cuando ocurre el evento (publicar, editar, renovar o reanudar). Lo ya avisado no se retira cuando el
+ * período se corre. El rango fijo (`desde`/`hasta`) no depende del reloj.
+ */
 export function dateRange(f: SearchFilters) {
   if (f.periodo === "rango") return { desde: f.desde!, hasta: f.hasta! };
   const hasta = localDate();
