@@ -1794,6 +1794,10 @@ describe("listados paginados: contrato", () => {
         expect(page.rows).toBe(size);
       }
       await expectOffset("/me/historial", 0, casesPage);
+      // Los casos de una persona salen de índices por usuario, sin recorrer todas las publicaciones ni todos los reclamos.
+      const plan = planOf((await run(20)).statements);
+      expect(plan).toContain("hallado_aceptado_usuario_idx (user_id=?)");
+      expect(plan).not.toMatch(/SCAN hallado_(claims|publications|reviews|thanks)/);
       // Los filtros se aplican en SQL: con tipo y días acotados solo se materializan las filas que cumplen.
       const filtered = await measure("/me/historial?tipo=devolvi&desde=2026-01-05&hasta=2026-01-06&pageSize=100", 0);
       expect(filtered.data.total).toBe(filtered.data.items.length);
@@ -1823,6 +1827,10 @@ describe("listados paginados: contrato", () => {
         expect(m.data.items.every((x: any) => x.sinLeer === 1)).toBe(true);
       }
       await expectOffset("/alertas", 0, alertsPage);
+      // Los sin leer de la página se buscan por el índice de la alerta, no recorriendo todas las notificaciones.
+      const plan = planOf((await run(20)).statements);
+      expect(plan).toContain("hallado_notificacion_alerta_idx (alert_id=? AND read_at=?)");
+      expect(plan).not.toMatch(/SCAN hallado_notifications/);
     });
 
     test("/notificaciones: reconcilia, pagina y obtiene total y sinLeer en SQL sin traer todas las filas", async () => {

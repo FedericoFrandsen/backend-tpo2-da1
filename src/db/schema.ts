@@ -53,6 +53,8 @@ export const claims = sqliteTable("hallado_claims", {
 }, (t) => [
   uniqueIndex("hallado_reclamo_usuario_unique").on(t.publicationId, t.userId),
   uniqueIndex("hallado_aceptado_unique").on(t.publicationId).where(sql`${t.estado} = 'aceptado'`),
+  // Casos de una persona (historial y reputación): evita recorrer todos los reclamos aceptados.
+  index("hallado_aceptado_usuario_idx").on(t.userId).where(sql`${t.estado} = 'aceptado'`),
   check("hallado_reclamo_estado_check", sql`${t.estado} IN ('pendiente','aceptado','rechazado','cancelado','vencido')`),
 ]);
 
@@ -132,7 +134,11 @@ export const notifications = sqliteTable("hallado_notifications", {
   dedupeKey: text("dedupe_key").unique(),
   readAt: text("read_at"),
   createdAt: text("created_at").notNull(),
-}, (t) => [index("hallado_notificacion_usuario_idx").on(t.userId, t.createdAt)]);
+}, (t) => [
+  index("hallado_notificacion_usuario_idx").on(t.userId, t.createdAt),
+  // Sin leer por alerta en /alertas y borrado en cascada de una alerta: evita recorrer todas las notificaciones.
+  index("hallado_notificacion_alerta_idx").on(t.alertId, t.readAt),
+]);
 
 export const messages = sqliteTable("hallado_messages", {
   id: text("id").primaryKey(),

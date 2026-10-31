@@ -1,0 +1,2 @@
+CREATE INDEX `hallado_aceptado_usuario_idx` ON `hallado_claims` (`user_id`) WHERE "hallado_claims"."estado" = 'aceptado';--> statement-breakpoint
+CREATE INDEX `hallado_notificacion_alerta_idx` ON `hallado_notifications` (`alert_id`,`read_at`);
