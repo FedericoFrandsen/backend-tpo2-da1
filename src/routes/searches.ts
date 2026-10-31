@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { requireUser } from "../auth";
 import type { AppDatabase } from "../database";
@@ -6,7 +6,7 @@ import { alerts, halladoPublications as posts, notifications, searchHistory } fr
 import { ApiError } from "../errors";
 import { matchesLive, normalizeFilters, notify, reconcileFollowedExpiries, rememberSearch, searchKey } from "../queries";
 import { filtersSchema } from "../types";
-import { nowIso, paginate } from "../utils";
+import { nowIso, pageResult, pageWindow } from "../utils";
 
 export function searchRoutes(db: AppDatabase) {
   return new Elysia()
@@ -28,12 +28,18 @@ export function searchRoutes(db: AppDatabase) {
     })
     .get("/alertas", async ({ headers, query }) => {
       const user = await requireUser(db, headers);
-      const rows = db.select().from(alerts).where(eq(alerts.userId, user.id)).orderBy(desc(alerts.createdAt), desc(alerts.id)).all();
-      const page = paginate(rows, query);
-      return { ...page, items: page.items.map((a) => ({
-        id: a.id, clave: a.clave, filtros: a.filtros, activa: a.activa, creadaEn: a.createdAt,
-        sinLeer: db.select({ id: notifications.id }).from(notifications).where(and(eq(notifications.alertId, a.id), isNull(notifications.readAt))).all().length,
-      })) };
+      const window = pageWindow(query);
+      const mine = eq(alerts.userId, user.id);
+      const total = db.select({ n: count() }).from(alerts).where(mine).get()!.n;
+      const rows = db.select().from(alerts).where(mine).orderBy(desc(alerts.createdAt), desc(alerts.id))
+        .limit(window.pageSize).offset(window.offset).all();
+      // Los sin leer de toda la página salen de una sola consulta agrupada por alerta.
+      const unread = new Map(!rows.length ? [] : db.select({ alertId: notifications.alertId, n: count() }).from(notifications)
+        .where(and(inArray(notifications.alertId, rows.map((a) => a.id)), isNull(notifications.readAt)))
+        .groupBy(notifications.alertId).all().map((r) => [r.alertId, r.n]));
+      return pageResult(rows.map((a) => ({
+        id: a.id, clave: a.clave, filtros: a.filtros, activa: a.activa, creadaEn: a.createdAt, sinLeer: unread.get(a.id) ?? 0,
+      })), window, total);
     })
     .post("/alertas", async ({ headers, body, set }) => {
       const user = await requireUser(db, headers);
@@ -80,14 +86,19 @@ export function searchRoutes(db: AppDatabase) {
     })
     .get("/notificaciones", async ({ headers, query }) => {
       const user = await requireUser(db, headers);
+      const window = pageWindow(query);
+      // Los avisos de vencimiento se crean antes de contar y listar, para que aparezcan en esta misma respuesta.
       db.transaction((tx) => reconcileFollowedExpiries(tx, user.id));
-      const rows = db.select().from(notifications).where(eq(notifications.userId, user.id))
-        .orderBy(desc(notifications.createdAt), desc(notifications.id)).all();
-      const page = paginate(rows, query);
-      return { ...page, sinLeer: rows.filter((n) => !n.readAt).length, items: page.items.map((n) => ({
+      const mine = eq(notifications.userId, user.id);
+      // Total y sin leer son de toda la cuenta, no de la página, y salen de una única consulta.
+      const totals = db.select({ total: count(), unread: sql<number>`count(*) filter (where ${notifications.readAt} is null)` })
+        .from(notifications).where(mine).get()!;
+      const rows = db.select().from(notifications).where(mine).orderBy(desc(notifications.createdAt), desc(notifications.id))
+        .limit(window.pageSize).offset(window.offset).all();
+      return { ...pageResult(rows.map((n) => ({
         id: n.id, tipo: n.tipo, mensaje: n.mensaje, publicacionId: n.publicationId, reclamoId: n.claimId,
         alertaId: n.alertId, creadaEn: n.createdAt, leidaEn: n.readAt,
-      })) };
+      })), window, totals.total), sinLeer: totals.unread };
     })
     .post("/notificaciones/:id/leida", async ({ headers, params }) => {
       const user = await requireUser(db, headers);

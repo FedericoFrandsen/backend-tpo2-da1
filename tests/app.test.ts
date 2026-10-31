@@ -1664,6 +1664,8 @@ describe("listados paginados: contrato", () => {
       (db.$client.query("EXPLAIN QUERY PLAN " + s.sql).all(...(s.params as any[])) as { detail: string }[]).map((r) => r.detail)).join("; ");
     // La consulta que lista cada página: ordena, y es la que debe llevar LIMIT.
     const followedPage = (s: Statement) => /from "hallado_follows" inner join "hallado_publications"/.test(s.sql) && /order by/i.test(s.sql);
+    const alertsPage = (s: Statement) => /from "hallado_alerts"/.test(s.sql) && /order by/i.test(s.sql);
+    const notificationsPage = (s: Statement) => /from "hallado_notifications"/.test(s.sql) && /order by/i.test(s.sql);
     /** Una página posterior a la primera agrega OFFSET a la misma consulta, con un máximo de filas igual al tamaño. */
     async function expectOffset(path: string, account: number, isPage: (s: Statement) => boolean) {
       const m = await measure(`${path}?page=2&pageSize=20`, account);
@@ -1704,5 +1706,41 @@ describe("listados paginados: contrato", () => {
       expect(top.map((x: any) => [x.id, x.estado])).toEqual([["f-149", "vencida"], ["f-148", "abierta"], ["f-147", "abierta"]]);
     });
 
+    test("/alertas: pagina en SQL y cuenta sinLeer de la página con una sola consulta agrupada", async () => {
+      for (let i = 0; i < 120; i++) {
+        const id = `al-${String(i).padStart(3, "0")}`;
+        db.insert(alerts).values({ id, userId: uid(0), clave: id, createdAt: at(i),
+          filtros: { situacion: "perdi", categoria: "Llaves", palabras: id, zona: "Palermo", periodo: "semana", ubicacion: null } }).run();
+        for (const read of [false, true]) db.insert(notifications).values({ id: `${id}-${read}`, userId: uid(0), tipo: "coincidencia", mensaje: "Aviso", alertId: id, readAt: read ? nowIso() : null, createdAt: at(i) }).run();
+      }
+      const run = await bounded("/alertas", 0, 120, 3);
+      for (const size of SIZES) {
+        const m = await run(size);
+        const page = m.statements.find(alertsPage)!;
+        expect(page.sql).toMatch(/ limit \?/i);
+        expect(page.rows).toBe(size);
+        expect(m.data.items.every((x: any) => x.sinLeer === 1)).toBe(true);
+      }
+      await expectOffset("/alertas", 0, alertsPage);
+    });
+
+    test("/notificaciones: reconcilia, pagina y obtiene total y sinLeer en SQL sin traer todas las filas", async () => {
+      for (let i = 0; i < 150; i++) {
+        db.insert(notifications).values({ id: `nt-${String(i).padStart(3, "0")}`, userId: uid(2), tipo: "publicacion", mensaje: `Aviso ${i}`,
+          readAt: i % 4 === 0 ? at(900) : null, createdAt: at(i) }).run();
+      }
+      const run = await bounded("/notificaciones", 2, 150, 3);
+      for (const size of SIZES) {
+        const m = await run(size);
+        const page = m.statements.find(notificationsPage)!;
+        expect(page.sql).toMatch(/ limit \?/i);
+        expect(page.rows).toBe(size);
+        expect(m.data.sinLeer).toBe(150 - 38);
+      }
+      await expectOffset("/notificaciones", 2, notificationsPage);
+      const plan = planOf((await run(20)).statements);
+      expect(plan).toContain("hallado_notificacion_usuario_idx (user_id=?)");
+      expect(plan).not.toMatch(/SCAN hallado_notifications/);
+    });
   });
 });
