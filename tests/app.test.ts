@@ -2104,4 +2104,35 @@ describe("alertas geográficas: coherencia entre búsqueda y alerta", () => {
     expect(named(await searched(fixed))).toEqual(["hace 9", "nuevo dentro del rango"]);
     expect(named(await notified(alerts.rango!.id))).toEqual(["hace 9", "nuevo dentro del rango"]);
   });
+
+  test("reanudar una alerta no recorre toda la tabla de publicaciones", async () => {
+    const alert = await createAlert(gps(3));
+    await setActive(alert.id, false);
+    tick();
+    await place("candidata", north(1));
+    const stamp = nowIso();
+    // Ruido que SQL puede descartar: otra categoría, el tipo equivocado o fuera de la caja del radio.
+    for (let i = 0; i < 60; i++) {
+      const where = i % 3 === 2 ? north(100 + i) : north(1);
+      db.insert(posts).values({ id: `ruido-${i}`, userId: accounts[OWNER]!.id, tipo: i % 3 === 1 ? "perdido" : "encontrado", titulo: `Ruido ${i}`,
+        descripcion: "Descripción de la publicación de ruido.", categoria: i % 3 === 0 ? "Ropa" : "Llaves", barrio: "Palermo", fecha: TODAY, franja: "tarde",
+        ...where, fotos: [], createdAt: stamp, updatedAt: stamp }).run();
+    }
+    const reads: number[] = [];
+    const original = db.$client.query.bind(db.$client);
+    (db.$client as any).query = (text: string) => {
+      const statement: any = original(text);
+      return new Proxy(statement, { get(target, prop) {
+        const value = target[prop];
+        if (typeof value !== "function") return value;
+        if (prop === "all" || prop === "values") return (...args: unknown[]) => { const rows = value.apply(target, args); if (/from "hallado_publications"/.test(text)) reads.push(rows.length); return rows; };
+        return value.bind(target);
+      } });
+    };
+    try { await setActive(alert.id, true); } finally { (db.$client as any).query = original; }
+    expect(named(await notified(alert.id))).toEqual(["candidata"]);
+    expect(reads.length).toBeGreaterThan(0);
+    // Solo salen de la base las candidatas que cumplen lo indexable, no las 60 de ruido más la candidata.
+    expect(Math.max(...reads)).toBeLessThanOrEqual(2);
+  });
 });

@@ -1,10 +1,10 @@
-import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { requireUser } from "../auth";
 import type { AppDatabase } from "../database";
 import { alerts, halladoPublications as posts, notifications, searchHistory } from "../db/schema";
 import { ApiError } from "../errors";
-import { matchesLive, normalizeFilters, notify, reconcileFollowedExpiries, rememberSearch, searchKey } from "../queries";
+import { matchingPosts, normalizeFilters, notify, reconcileFollowedExpiries, rememberSearch, searchKey } from "../queries";
 import { filtersSchema } from "../types";
 import { nowIso, pageResult, pageWindow } from "../utils";
 
@@ -60,12 +60,12 @@ export function searchRoutes(db: AppDatabase) {
         if (!a) throw new ApiError(404, "ALERT_NOT_FOUND", "No encontramos la alerta");
         tx.update(alerts).set({ activa: body.activa }).where(eq(alerts.id, a.id)).run();
         if (body.activa && !a.activa) {
-          for (const p of tx.select().from(posts).where(isNull(posts.deletedAt)).all()) {
-            if (p.userId !== user.id && p.updatedAt >= a.createdAt && matchesLive(tx, p, a.filtros)) {
-              notify(tx, user.id, "coincidencia", `Hay una coincidencia: ${p.titulo}`, {
-                publicationId: p.id, alertId: a.id, dedupeKey: `alert:${a.id}:${p.id}`,
-              });
-            }
+          // Novedades desde que se creó la alerta (alta o edición posterior) de otras personas y que coinciden hoy:
+          // las mismas condiciones SQL que la búsqueda acotan la lectura, sin cargar todas las publicaciones.
+          for (const p of matchingPosts(tx, a.filtros, [ne(posts.userId, user.id), gte(posts.updatedAt, a.createdAt)])) {
+            notify(tx, user.id, "coincidencia", `Hay una coincidencia: ${p.titulo}`, {
+              publicationId: p.id, alertId: a.id, dedupeKey: `alert:${a.id}:${p.id}`,
+            });
           }
         }
       });

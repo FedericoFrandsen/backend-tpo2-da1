@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gt, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { union } from "drizzle-orm/sqlite-core";
 import type { Store } from "./database";
 import { alerts, claims, follows, halladoPublications as posts, halladoReviews, notifications, searchHistory, uploads, users } from "./db/schema";
@@ -275,13 +275,11 @@ function boundingBox(o: { latitud: number; longitud: number }, radioKm: number) 
   return { lat, lon: lon.min < -180 || lon.max > 180 ? null : lon };
 }
 /**
- * Búsqueda pública paginada. SQL aplica lo indexable (abierta, no eliminada, tipo, categoría, fechas, barrio, vigencia
- * y caja del radio); el texto libre y la distancia exacta se resuelven en memoria sobre ese conjunto ya acotado.
- * Para «recientes» sin palabras ni GPS el orden, el conteo y la página los resuelve SQL por completo.
- * Resultado idéntico al de filtrar todas las abiertas con `matchesLive` y ordenar en memoria.
+ * Condiciones SQL de lo indexable de unos filtros: abierta, no eliminada, tipo, categoría, fechas, barrio, vigencia y caja del radio.
+ * El texto libre y la distancia exacta quedan para `matchesPost`. Búsqueda y alertas parten de las mismas condiciones, así que
+ * ninguna lee más publicaciones de las que pueden coincidir. Devuelve `null` si el barrio pedido no existe entre las candidatas.
  */
-export function searchPosts(db: Store, f: SearchFilters, origin: { latitud: number; longitud: number } | undefined, orden: "recientes" | "cercanos", q: Record<string, string | undefined>) {
-  const { page, pageSize } = pageOptions(q);
+function candidateConditions(db: Store, f: SearchFilters) {
   const range = dateRange(f);
   const conditions = [
     isNull(posts.deletedAt), eq(posts.estado, "abierta"), eq(posts.tipo, f.situacion === "perdi" ? "encontrado" : "perdido"),
@@ -298,9 +296,30 @@ export function searchPosts(db: Store, f: SearchFilters, origin: { latitud: numb
     const zona = normalizeText(f.zona);
     const barrios = db.select({ barrio: posts.barrio }).from(posts).where(and(...conditions)).groupBy(posts.barrio).all()
       .map((r) => r.barrio).filter((b) => normalizeText(b) === zona);
-    if (!barrios.length) return { items: [], page, pageSize, total: 0, totalPages: 0 };
+    if (!barrios.length) return null;
     conditions.push(inArray(posts.barrio, barrios));
   }
+  return conditions;
+}
+/**
+ * Publicaciones que coinciden con los filtros (`matchesLive`), leyendo de la base solo las candidatas acotadas por
+ * `candidateConditions` y por `extra` (por ejemplo, excluir las propias). No carga la tabla ni pagina antes de la distancia exacta.
+ */
+export function matchingPosts(db: Store, f: SearchFilters, extra: SQL[] = []) {
+  const conditions = candidateConditions(db, f);
+  if (!conditions) return [];
+  return db.select().from(posts).where(and(...conditions, ...extra)).all().filter((p) => matchesLive(db, p, f));
+}
+/**
+ * Búsqueda pública paginada. SQL aplica lo indexable (`candidateConditions`); el texto libre y la distancia exacta se
+ * resuelven en memoria sobre ese conjunto ya acotado.
+ * Para «recientes» sin palabras ni GPS el orden, el conteo y la página los resuelve SQL por completo.
+ * Resultado idéntico al de filtrar todas las abiertas con `matchesLive` y ordenar en memoria.
+ */
+export function searchPosts(db: Store, f: SearchFilters, origin: { latitud: number; longitud: number } | undefined, orden: "recientes" | "cercanos", q: Record<string, string | undefined>) {
+  const { page, pageSize } = pageOptions(q);
+  const conditions = candidateConditions(db, f);
+  if (!conditions) return { items: [], page, pageSize, total: 0, totalPages: 0 };
   const where = and(...conditions);
   const withKm = (p: Post) => ({ p, km: origin ? distanceKm(origin, p) : null });
   const recent = [desc(posts.fecha), desc(posts.createdAt), posts.id];
