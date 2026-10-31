@@ -1143,3 +1143,121 @@ describe("búsqueda: contrato de resultados", () => {
     } finally { (db.$client as any).query = original; }
   });
 });
+
+describe("novedades de vencimiento y renovación para seguidores", () => {
+  /** Fija el vencimiento del ciclo sin esperar días; `days` distintos dan ciclos de vencimiento distintos. */
+  const expireAt = (id: string, days = 1) =>
+    db.update(posts).set({ venceAt: new Date(Date.now() - days * 86_400_000).toISOString() }).where(eq(posts.id, id)).run();
+  const notifs = async (account: number) => (await api("/notificaciones", "GET", undefined, accounts[account]!.token)).data;
+  const withPrefix = (data: { items: { mensaje: string }[] }, prefix: string) => data.items.filter((n) => n.mensaje.startsWith(prefix));
+  const renew = (id: string) => api(`/publicaciones/${id}/renovar`, "POST", undefined, accounts[0]!.token);
+  const follow = (id: string, account = 2) => api(`/publicaciones/${id}/seguir`, "POST", undefined, accounts[account]!.token);
+
+  test("cada ciclo avisa una sola vez al seguidor, sin abrir el detalle y sin avisar a ajenos", async () => {
+    const p = await publish();
+    await follow(p.id);
+    expect((await notifs(2)).total).toBe(0);
+
+    expireAt(p.id, 1);
+    // Consultas repetidas y simultáneas de novedades no duplican el aviso.
+    const polls = await Promise.all([notifs(2), notifs(2), notifs(2)]);
+    for (const poll of polls) expect(withPrefix(poll, "Venció")).toHaveLength(1);
+    expect(withPrefix(await notifs(2), "Venció")).toHaveLength(1);
+    expect((await notifs(2)).total).toBe(1);
+    expect((await notifs(1)).total).toBe(0);
+    expect((await notifs(0)).total).toBe(0);
+    expect((await notifs(2)).items[0].publicacionId).toBe(p.id);
+
+    const renewed = await renew(p.id);
+    expect(renewed.response.status).toBe(200); expect(renewed.data.estado).toBe("abierta");
+    expect(withPrefix(await notifs(2), "Se renovó")).toHaveLength(1);
+    await renew(p.id);
+    await Promise.all([renew(p.id), renew(p.id)]);
+    expect(withPrefix(await notifs(2), "Se renovó")).toHaveLength(1);
+    expect((await notifs(2)).total).toBe(2);
+
+    // Segundo ciclo: vuelve a vencer y a renovarse, y avisa de nuevo exactamente una vez por transición.
+    expireAt(p.id, 2);
+    await notifs(2); await notifs(2);
+    expect(withPrefix(await notifs(2), "Venció")).toHaveLength(2);
+    await renew(p.id);
+    await renew(p.id);
+    const final = await notifs(2);
+    expect(withPrefix(final, "Venció")).toHaveLength(2);
+    expect(withPrefix(final, "Se renovó")).toHaveLength(2);
+    expect(final.total).toBe(4);
+    expect((await notifs(1)).total).toBe(0);
+  });
+
+  test("renovar una publicación vencida sin haber consultado antes deja vencimiento y renovación; lo vigente no avisa", async () => {
+    const p = await publish();
+    await follow(p.id);
+    // Nunca vencida: renovar no emite un cambio de estado falso.
+    expect((await renew(p.id)).response.status).toBe(200);
+    expect((await notifs(2)).total).toBe(0);
+    // Vencida y renovada sin que nadie consulte entre medio: ambas novedades quedan registradas.
+    expireAt(p.id);
+    expect((await renew(p.id)).response.status).toBe(200);
+    const after = await notifs(2);
+    expect(withPrefix(after, "Venció")).toHaveLength(1);
+    expect(withPrefix(after, "Se renovó")).toHaveLength(1);
+    expect(after.total).toBe(2);
+  });
+
+  test("el detalle y las seguidas también reconcilian, sin avisar a quien dejó de seguir", async () => {
+    const p = await publish();
+    await follow(p.id); await follow(p.id, 1);
+    await api(`/publicaciones/${p.id}/seguir`, "DELETE", undefined, accounts[1]!.token);
+    expireAt(p.id);
+    expect((await api(`/publicaciones/${p.id}`)).data.estado).toBe("vencida");
+    await api(`/publicaciones/${p.id}`); await api("/me/seguidas", "GET", undefined, accounts[2]!.token);
+    expect(withPrefix(await notifs(2), "Venció")).toHaveLength(1);
+    expect((await notifs(2)).total).toBe(1);
+    expect((await notifs(1)).total).toBe(0);
+  });
+
+  test("con reclamo pendiente vigente o aceptado la publicación no vence y no hay aviso; resuelta no se renueva", async () => {
+    const pending = await publish();
+    await follow(pending.id);
+    await claim(pending.id);
+    const accepted = await publish();
+    await follow(accepted.id);
+    await accept(accepted.id);
+    expireAt(pending.id); expireAt(accepted.id);
+    const before = (await notifs(2)).total;
+    expect(withPrefix(await notifs(2), "Venció")).toHaveLength(0);
+    // El reclamo aceptado de la segunda publicación ya había avisado "en reclamo": solo cuentan las novedades de vencimiento.
+    expect(before).toBe(1);
+    expect((await renew(accepted.id)).response.status).toBe(200);
+    expect(withPrefix(await notifs(2), "Se renovó")).toHaveLength(0);
+    await api(`/publicaciones/${accepted.id}/resolver`, "POST", undefined, accounts[0]!.token);
+    expireAt(accepted.id);
+    expect((await renew(accepted.id)).response.status).toBe(409);
+    const final = await notifs(2);
+    expect(withPrefix(final, "Venció")).toHaveLength(0);
+    expect(withPrefix(final, "Se renovó")).toHaveLength(0);
+  });
+
+  test("al reabrir la base no se repiten los avisos de un ciclo ya notificado", async () => {
+    const path = join(temp, "reabrir.sqlite");
+    db.$client.close();
+    db = createDatabase(path);
+    app = createApp(db, { uploadsPath: join(temp, "uploads"), sendOtp: async () => {} });
+    for (let i = 0; i < 3; i++) {
+      db.insert(users).values({ id: accounts[i]!.id, email: accounts[i]!.email, passwordHash, name: `Persona ${i}`, phone: `115555000${i}`, sharePhone: true, zone: "Palermo", createdAt: nowIso(), emailVerifiedAt: nowIso() }).run();
+      accounts[i]!.token = (await createSession(db, accounts[i]!.id, 1)).token;
+    }
+    const p = await publish();
+    await follow(p.id);
+    expireAt(p.id);
+    expect(withPrefix(await notifs(2), "Venció")).toHaveLength(1);
+    db.$client.close();
+    db = createDatabase(path);
+    app = createApp(db, { uploadsPath: join(temp, "uploads"), sendOtp: async () => {} });
+    await notifs(2); await api(`/publicaciones/${p.id}`);
+    expect((await notifs(2)).total).toBe(1);
+    expect((await renew(p.id)).response.status).toBe(200);
+    expect(withPrefix(await notifs(2), "Se renovó")).toHaveLength(1);
+    expect((await notifs(2)).total).toBe(2);
+  });
+});
