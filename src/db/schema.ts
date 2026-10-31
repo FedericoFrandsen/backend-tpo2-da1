@@ -73,7 +73,11 @@ export const follows = sqliteTable("hallado_follows", {
   publicationId: text("publication_id").notNull().references(() => halladoPublications.id),
   userId: text("user_id").notNull().references(() => users.id),
   createdAt: text("created_at").notNull(),
-}, (t) => [primaryKey({ columns: [t.publicationId, t.userId] })]);
+}, (t) => [
+  primaryKey({ columns: [t.publicationId, t.userId] }),
+  // Acota a las seguidas de una persona la reconciliación de vencimientos.
+  index("hallado_seguimiento_usuario_idx").on(t.userId),
+]);
 
 export const halladoReviews = sqliteTable("hallado_reviews", {
   id: text("id").primaryKey(),

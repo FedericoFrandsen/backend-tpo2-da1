@@ -1,0 +1,1 @@
+CREATE INDEX `hallado_seguimiento_usuario_idx` ON `hallado_follows` (`user_id`);

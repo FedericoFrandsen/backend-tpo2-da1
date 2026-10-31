@@ -954,7 +954,8 @@ describe("verificación del publicador, pruebas privadas, vencimiento e idempote
   test("la migración conserva datos y da 30 días de vigencia a las publicaciones existentes", () => {
     const folder = join(temp, "before-contract");
     for (const name of readdirSync(new URL("../drizzle", import.meta.url))) {
-      if (name.startsWith("2026") && !name.endsWith("contrato_verificacion_vencimiento")) {
+      // Solo las migraciones anteriores a la del contrato (los nombres empiezan por su marca de tiempo).
+      if (name.startsWith("2026") && name < "20261029184216_contrato_verificacion_vencimiento") {
         cpSync(new URL(`../drizzle/${name}`, import.meta.url), join(folder, name), { recursive: true });
       }
     }
