@@ -4,7 +4,7 @@ import { requireUser } from "../auth";
 import type { AppDatabase, Store } from "../database";
 import { encounters } from "../db/schema";
 import { ApiError } from "../errors";
-import { getClaim, getPost } from "../queries";
+import { getClaim, getPost, notify } from "../queries";
 import { cleanText, nowIso } from "../utils";
 
 function meeting(db: Store, claimId: string, userId: string) {
@@ -27,6 +27,13 @@ function meeting(db: Store, claimId: string, userId: string) {
     puedeProponer: encuentro ? puedeResponder : holderId === userId,
     puedeResponder,
   };
+}
+
+/** Avisa a la otra parte del reclamo, dentro de la transacción de quien actúa. */
+function notifyOther(db: Store, claimId: string, actorId: string, mensaje: (titulo: string) => string) {
+  const claim = getClaim(db, claimId);
+  const post = getPost(db, claim.publicationId);
+  notify(db, actorId === claim.userId ? post.userId : claim.userId, "encuentro", mensaje(post.titulo), { claimId: claim.id, publicationId: post.id });
 }
 
 function checkProposal(actual: ReturnType<typeof meeting>, id: string | null, intento: number) {
@@ -56,6 +63,8 @@ export function encounterRoutes(db: AppDatabase) {
         } else {
           tx.insert(encounters).values({ ...values, claimId: params.id, intento: actual.intento }).run();
         }
+        notifyOther(tx, params.id, user.id, (titulo) => actual.encuentro
+          ? `Te sugirieron otro punto de encuentro para ${titulo}` : `Te propusieron un punto de encuentro para ${titulo}`);
         return meeting(tx, params.id, user.id);
       });
     }, { body: t.Object({
@@ -72,6 +81,7 @@ export function encounterRoutes(db: AppDatabase) {
         }
         tx.update(encounters).set({ estado: "aceptado", updatedAt: nowIso() })
           .where(eq(encounters.id, actual.encuentro.id)).run();
+        notifyOther(tx, params.id, user.id, (titulo) => `Aceptaron el punto de encuentro de ${titulo}`);
         return meeting(tx, params.id, user.id);
       });
     }, { body: t.Object({

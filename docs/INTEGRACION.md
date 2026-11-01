@@ -257,14 +257,14 @@ Las dos partes pueden valorar a su contraparte una única vez tras resolver. Se 
   "corte": "412@2026-03-01T00:03:20.000Z",
   "alertas": [{ "alertaId": "a-1", "sinLeer": 2 }],
   "publicaciones": [{ "publicacionId": "p-1", "sinLeer": 2 }],
-  "reclamos": [{ "reclamoId": "c-1", "sinLeer": 3 }]
+  "reclamos": [{ "reclamoId": "c-1", "sinLeer": 4, "mensajes": 3 }]
 }
 ```
 
 - `sinLeer`: todas las sin leer de la cuenta, de cualquier tipo (el mismo valor que `sinLeer` de `GET /notificaciones`).
 - `alertas`: avisos de tipo `coincidencia` por alerta, contando publicaciones distintas (la misma publicación avisada dos veces cuenta una).
 - `publicaciones`: avisos de tipo `publicacion` (novedades de seguidas) por publicación, uno cada aviso.
-- `reclamos`: avisos de tipo `mensaje` por reclamo, uno cada mensaje. Los demás tipos (`reclamo`, `devolucion`, `valoracion`) solo suman a `sinLeer`.
+- `reclamos`: avisos con `claimId` de tipo `mensaje`, `reclamo`, `encuentro` y `devolucion`, por reclamo, uno cada aviso (es el indicador de lo que pasó en un reclamo, no solo del chat). `sinLeer` los cuenta a todos y `mensajes` cuántos de ellos son de tipo `mensaje`. La `valoracion` solo suma a `sinLeer` general.
 - Listas ordenadas por id y vacías si no hay pendientes; solo figuran las entidades con pendientes. El tamaño de la respuesta y el trabajo del servidor son proporcionales a esas entidades, no al historial leído (usa el índice parcial de no leídas `hallado_notificacion_sinleer_idx`).
 - Antes de contar reconcilia los vencimientos de lo que la persona sigue, igual que `GET /notificaciones`: el aviso «Venció» aparece en el resumen aunque nadie pida el listado, las seguidas ni el detalle.
 - `corte` es opaco (`null` si no hay pendientes): marca hasta dónde llegó lo que se muestra.
@@ -275,11 +275,11 @@ Las dos partes pueden valorar a su contraparte una única vez tras resolver. Se 
 { "tipo": "alerta", "id": "a-1", "corte": "412@2026-03-01T00:03:20.000Z" }
 ```
 
-- `tipo`: `alerta` (avisos `coincidencia` de esa alerta), `publicacion` (avisos `publicacion` de esa publicación) o `reclamo` (avisos `mensaje` de ese reclamo). Otro valor, un `id` vacío o falta de campos: 422 `VALIDATION_ERROR`.
+- `tipo`: `alerta` (avisos `coincidencia` de esa alerta), `publicacion` (avisos `publicacion` de esa publicación) o `reclamo` (avisos `mensaje`, `reclamo`, `encuentro` y `devolucion` de ese reclamo). Otro valor, un `id` vacío o falta de campos: 422 `VALIDATION_ERROR`.
 - `corte`: el que devolvió el último resumen. Solo se marcan las sin leer del grupo con alta hasta ese corte, de modo que un aviso llegado después de lo mostrado sigue sin leer. Un corte con otro formato: 422 `INVALID_CUTOFF`.
 - Pertenencia: la alerta debe ser de quien llama (404 `ALERT_NOT_FOUND`); en un reclamo, quien reclamó o quien publicó (404 `CLAIM_NOT_FOUND`); la publicación debe existir (404 `PUBLICATION_NOT_FOUND`). Siempre se marcan solo notificaciones de la cuenta autenticada.
 - Respuesta 200: `{ "message", "marcadas", "resumen" }`, con `resumen` ya reconciliado con la forma de `GET /notificaciones/resumen` (incluye avisos nuevos que no se marcaron). Repetir la llamada es idempotente (`marcadas: 0`).
 
 Los endpoints anteriores (`GET /notificaciones` paginado, `POST /notificaciones/:id/leida`, `POST /notificaciones/leidas` y `POST /alertas/:id/leida`) siguen igual.
 
-Una publicación nueva o editada que coincide con una alerta activa genera una notificación, excepto si es del mismo usuario. No se repite la misma coincidencia alerta/publicación. Al reactivar se revisan publicaciones creadas o actualizadas desde que se guardó la alerta. Al guardar una alerta no se notifican todas las coincidencias previas. Las notificaciones también incluyen novedades de seguidas, reclamos, devoluciones, mensajes y valoraciones. Se guardan en SQLite y se consultan desde la app; no se envían por email ni push. Internamente, al publicar, editar o renovar solo se evalúan las alertas activas de otras personas con la misma categoría y la situación opuesta (preselección indexada en SQLite); el barrio, el radio exacto, las palabras, las fechas y la vigencia se comprueban después con la misma regla que la búsqueda, así que el resultado es el mismo que evaluando todas. El trabajo sigue siendo proporcional a las alertas candidatas y puede ser alto si casi todas coinciden.
+Una publicación nueva o editada que coincide con una alerta activa genera una notificación, excepto si es del mismo usuario. No se repite la misma coincidencia alerta/publicación. Al reactivar se revisan publicaciones creadas o actualizadas desde que se guardó la alerta. Al guardar una alerta no se notifican todas las coincidencias previas. Las notificaciones también incluyen novedades de seguidas, reclamos, devoluciones, mensajes, valoraciones y puntos de encuentro: el tipo `encuentro` (con `reclamoId` y `publicacionId`) avisa a la otra parte cuando se propone un punto de encuentro («Te propusieron un punto de encuentro para …»), cuando se sugiere una alternativa («Te sugirieron otro punto de encuentro para …») y cuando se acepta («Aceptaron el punto de encuentro de …»). Se guardan en SQLite y se consultan desde la app; no se envían por email ni push. Internamente, al publicar, editar o renovar solo se evalúan las alertas activas de otras personas con la misma categoría y la situación opuesta (preselección indexada en SQLite); el barrio, el radio exacto, las palabras, las fechas y la vigencia se comprueban después con la misma regla que la búsqueda, así que el resultado es el mismo que evaluando todas. El trabajo sigue siendo proporcional a las alertas candidatas y puede ser alto si casi todas coinciden.

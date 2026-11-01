@@ -2433,12 +2433,13 @@ describe("resumen de notificaciones sin leer y lectura por grupo", () => {
     expect(Object.keys(r)).toEqual(["sinLeer", "corte", "alertas", "publicaciones", "reclamos"]);
     expect(r.alertas).toEqual([{ alertaId: "a-1", sinLeer: 2 }, { alertaId: "a-2", sinLeer: 1 }]);
     expect(r.publicaciones).toEqual([{ publicacionId: "p-1", sinLeer: 2 }, { publicacionId: "p-2", sinLeer: 1 }]);
-    expect(r.reclamos).toEqual([{ reclamoId: "c-1", sinLeer: 3 }, { reclamoId: "c-2", sinLeer: 1 }]);
+    // Mensajes y el aviso del reclamo mismo suman al reclamo; `mensajes` cuenta solo los del chat.
+    expect(r.reclamos).toEqual([{ reclamoId: "c-1", sinLeer: 4, mensajes: 3 }, { reclamoId: "c-2", sinLeer: 1, mensajes: 1 }]);
     // Total de la cuenta: igual al sinLeer del listado paginado, que cuenta todos los tipos.
     expect(r.sinLeer).toBe(13);
     expect(r.sinLeer).toBe((await get("/notificaciones?pageSize=1", 2)).data.sinLeer);
     expect(typeof r.corte).toBe("string");
-    expect(await resumen(0)).toMatchObject({ sinLeer: 3, alertas: [{ alertaId: "a-ajena", sinLeer: 1 }], publicaciones: [{ publicacionId: "p-1", sinLeer: 1 }], reclamos: [{ reclamoId: "c-1", sinLeer: 1 }] });
+    expect(await resumen(0)).toMatchObject({ sinLeer: 3, alertas: [{ alertaId: "a-ajena", sinLeer: 1 }], publicaciones: [{ publicacionId: "p-1", sinLeer: 1 }], reclamos: [{ reclamoId: "c-1", sinLeer: 1, mensajes: 1 }] });
     expect(await resumen(1)).toEqual({ sinLeer: 0, corte: null, alertas: [], publicaciones: [], reclamos: [] });
   });
 
@@ -2504,13 +2505,13 @@ describe("resumen de notificaciones sin leer y lectura por grupo", () => {
     expect((await leerGrupo(2, "publicacion", "p-1", r.corte)).data.marcadas).toBe(0);
     // Alerta (marca todas las filas del grupo, no las distintas) y reclamo.
     expect((await leerGrupo(2, "alerta", "a-1", r.corte)).data.marcadas).toBe(3);
-    expect((await leerGrupo(2, "reclamo", "c-1", r.corte)).data.marcadas).toBe(3);
+    expect((await leerGrupo(2, "reclamo", "c-1", r.corte)).data.marcadas).toBe(4);
     const last = await resumen(2);
     expect(last.alertas).toEqual([{ alertaId: "a-2", sinLeer: 1 }]);
-    expect(last.reclamos).toEqual([{ reclamoId: "c-2", sinLeer: 1 }]);
+    expect(last.reclamos).toEqual([{ reclamoId: "c-2", sinLeer: 1, mensajes: 1 }]);
     expect(last.publicaciones).toEqual([{ publicacionId: "p-2", sinLeer: 1 }]);
-    // Los demás tipos no tienen grupo y se conservan hasta «marcar todo».
-    expect(last.sinLeer).toBe(13 - 2 - 3 - 3);
+    // Los tipos sin grupo (la valoración) se conservan hasta «marcar todo».
+    expect(last.sinLeer).toBe(13 - 2 - 3 - 4);
   });
 
   test("la lectura por grupo valida sesión, cuerpo, tipo y pertenencia", async () => {
@@ -2551,7 +2552,7 @@ describe("resumen de notificaciones sin leer y lectura por grupo", () => {
     const after = await resumen(2);
     expect(after.publicaciones).toEqual([{ publicacionId: "p-1", sinLeer: 1 }, { publicacionId: "p-2", sinLeer: 1 }]);
     expect(after.alertas).toEqual([{ alertaId: "a-1", sinLeer: 1 }, { alertaId: "a-2", sinLeer: 1 }]);
-    expect(after.reclamos).toEqual([{ reclamoId: "c-1", sinLeer: 1 }, { reclamoId: "c-2", sinLeer: 1 }]);
+    expect(after.reclamos).toEqual([{ reclamoId: "c-1", sinLeer: 1, mensajes: 1 }, { reclamoId: "c-2", sinLeer: 1, mensajes: 1 }]);
     // Con el corte nuevo sí se marcan.
     expect((await leerGrupo(2, "publicacion", "p-1", after.corte)).data.marcadas).toBe(1);
     expect((await resumen(0)).sinLeer).toBe(3);
@@ -3168,5 +3169,71 @@ describe("contador de Seguidas: avisos que ya no se pueden limpiar", () => {
       expect(sinLeer).toEqual(["coincidencia-borrada", "reclamo-vivo", "seguida-viva", "sin-publicacion"]);
       expect(rows.find((n) => n.id === "seguida-borrada")!.readAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     } finally { upgraded.$client.close(); }
+  });
+});
+
+describe("indicador de reclamos entrantes y avisos de encuentro", () => {
+  const resumen = async (account: number) => (await api("/notificaciones/resumen", "GET", undefined, accounts[account]!.token)).data;
+  const avisos = (account: number, tipo: string) => db.select().from(notifications).where(eq(notifications.userId, accounts[account]!.id)).all().filter((n) => n.tipo === tipo);
+  const propose = async (id: string, user: number, direccion: string) => {
+    const actual = (await api(`/reclamos/${id}/encuentro`, "GET", undefined, accounts[user]!.token)).data;
+    return api(`/reclamos/${id}/encuentro`, "POST", { direccion, propuestaId: actual.encuentro?.id ?? null, intento: actual.intento }, accounts[user]!.token);
+  };
+
+  test("proponer, sugerir otra y aceptar avisan a la otra parte, y el reclamo suma todo lo que pasa en él", async () => {
+    const p = await publish(); const c = await accept(p.id);
+    for (const i of [0, 1]) await api("/notificaciones/leidas", "POST", undefined, accounts[i]!.token);
+    // Un intento que falla no avisa a nadie.
+    expect((await propose(c.id, 1, "Lima 775")).response.status).toBe(409);
+    expect(avisos(0, "encuentro")).toHaveLength(0); expect(avisos(1, "encuentro")).toHaveLength(0);
+
+    const first = await propose(c.id, 0, "Av. Santa Fe 1234");
+    expect(first.response.status).toBe(200);
+    const propuesta = avisos(1, "encuentro");
+    expect(propuesta).toHaveLength(1);
+    expect(propuesta[0]).toMatchObject({ mensaje: "Te propusieron un punto de encuentro para Llaves con llavero azul", claimId: c.id, publicationId: p.id, readAt: null });
+    expect(avisos(0, "encuentro")).toHaveLength(0);
+    const lista = (await api("/notificaciones", "GET", undefined, accounts[1]!.token)).data.items.find((n: any) => n.tipo === "encuentro");
+    expect(lista).toMatchObject({ reclamoId: c.id, publicacionId: p.id });
+    expect(await resumen(1)).toMatchObject({ sinLeer: 1, reclamos: [{ reclamoId: c.id, sinLeer: 1, mensajes: 0 }] });
+
+    const second = await propose(c.id, 1, "Lima 775, CABA");
+    expect(second.response.status).toBe(200);
+    expect(avisos(0, "encuentro").map((n) => n.mensaje)).toEqual(["Te sugirieron otro punto de encuentro para Llaves con llavero azul"]);
+    expect(avisos(0, "encuentro")[0]).toMatchObject({ claimId: c.id, publicationId: p.id });
+
+    const accepted = await api(`/reclamos/${c.id}/encuentro/aceptar`, "POST", { propuestaId: second.data.encuentro.id, intento: 1 }, accounts[0]!.token);
+    expect(accepted.response.status).toBe(200);
+    expect(avisos(1, "encuentro").map((n) => n.mensaje).sort()).toEqual(
+      ["Aceptaron el punto de encuentro de Llaves con llavero azul", "Te propusieron un punto de encuentro para Llaves con llavero azul"]);
+    // Aceptar una propuesta que no corresponde falla y no avisa.
+    expect((await api(`/reclamos/${c.id}/encuentro/aceptar`, "POST", { propuestaId: second.data.encuentro.id, intento: 1 }, accounts[0]!.token)).response.status).toBe(409);
+    expect(avisos(1, "encuentro")).toHaveLength(2);
+
+    // Un mensaje y la devolución se suman al mismo reclamo; `mensajes` cuenta solo los del chat.
+    expect((await api(`/reclamos/${c.id}/mensajes`, "POST", { texto: "Llego en diez minutos" }, accounts[0]!.token)).response.status).toBe(201);
+    expect((await api(`/publicaciones/${p.id}/resolver`, "POST", undefined, accounts[0]!.token)).response.status).toBe(200);
+    const antes = await resumen(1);
+    expect(antes.reclamos).toEqual([{ reclamoId: c.id, sinLeer: 4, mensajes: 1 }]);
+    expect(antes.sinLeer).toBe(4);
+    // La otra parte ve sus propios avisos del reclamo: la sugerencia de alternativa.
+    expect((await resumen(0)).reclamos).toEqual([{ reclamoId: c.id, sinLeer: 1, mensajes: 0 }]);
+
+    // Leer el grupo del reclamo marca todos esos tipos con el corte mostrado.
+    const leido = await api("/notificaciones/grupo/leida", "POST", { tipo: "reclamo", id: c.id, corte: antes.corte }, accounts[1]!.token);
+    expect(leido.response.status).toBe(200); expect(leido.data.marcadas).toBe(4);
+    expect(leido.data.resumen).toMatchObject({ sinLeer: 0, reclamos: [] });
+    expect(await resumen(1)).toMatchObject({ sinLeer: 0, reclamos: [] });
+  });
+
+  test("un aviso del reclamo llegado después del corte mostrado no se marca como leído", async () => {
+    const p = await publish(); const c = await accept(p.id);
+    await api("/notificaciones/leidas", "POST", undefined, accounts[1]!.token);
+    await propose(c.id, 0, "Av. Santa Fe 1234");
+    const mostrado = await resumen(1);
+    await api(`/reclamos/${c.id}/mensajes`, "POST", { texto: "¿Seguís en camino?" }, accounts[0]!.token);
+    const r = await api("/notificaciones/grupo/leida", "POST", { tipo: "reclamo", id: c.id, corte: mostrado.corte }, accounts[1]!.token);
+    expect(r.data.marcadas).toBe(1);
+    expect(r.data.resumen.reclamos).toEqual([{ reclamoId: c.id, sinLeer: 1, mensajes: 1 }]);
   });
 });

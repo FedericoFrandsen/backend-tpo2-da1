@@ -28,11 +28,14 @@ function unreadSummary(db: Store, userId: string) {
   const publicaciones = db.select({ publicacionId: notifications.publicationId, sinLeer: count() }).from(notifications)
     .where(and(unread, eq(notifications.tipo, "publicacion"), sql`${notifications.publicationId} is not null`))
     .groupBy(notifications.publicationId).orderBy(asc(notifications.publicationId)).all();
-  const reclamos = db.select({ reclamoId: notifications.claimId, sinLeer: count() }).from(notifications)
-    .where(and(unread, eq(notifications.tipo, "mensaje"), sql`${notifications.claimId} is not null`))
+  // Todo lo que pasa en un reclamo suma; `mensajes` es cuántos de esos avisos son mensajes del chat.
+  const reclamos = db.select({ reclamoId: notifications.claimId, sinLeer: count(), mensajes: sql<number>`count(*) filter (where ${notifications.tipo} = 'mensaje')` }).from(notifications)
+    .where(and(unread, inArray(notifications.tipo, CLAIM_TYPES), sql`${notifications.claimId} is not null`))
     .groupBy(notifications.claimId).orderBy(asc(notifications.claimId)).all();
   return { sinLeer: total, corte: last ? `${last.rowid}@${last.createdAt}` : null, alertas, publicaciones, reclamos };
 }
+/** Avisos que viven en un reclamo: mensajes, el reclamo mismo, el punto de encuentro y la devolución. */
+const CLAIM_TYPES = ["mensaje", "reclamo", "encuentro", "devolucion"];
 const CUTOFF = /^([1-9]\d{0,15})@(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)$/;
 
 export function searchRoutes(db: AppDatabase) {
@@ -148,7 +151,7 @@ export function searchRoutes(db: AppDatabase) {
             .where(and(eq(claims.id, body.id), or(eq(claims.userId, user.id), eq(posts.userId, user.id)))).get()) {
             throw new ApiError(404, "CLAIM_NOT_FOUND", "No encontramos el reclamo");
           }
-          field = and(eq(notifications.tipo, "mensaje"), eq(notifications.claimId, body.id));
+          field = and(inArray(notifications.tipo, CLAIM_TYPES), eq(notifications.claimId, body.id));
         } else {
           if (!tx.select({ id: posts.id }).from(posts).where(eq(posts.id, body.id)).get()) {
             throw new ApiError(404, "PUBLICATION_NOT_FOUND", "No encontramos la publicación");
