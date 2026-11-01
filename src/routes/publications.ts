@@ -6,7 +6,7 @@ import { claims, follows, halladoPublications as posts } from "../db/schema";
 import { ApiError } from "../errors";
 import { expirePendingClaims, filtersFromQuery, getPost, isExpired, notify, notifyExpiry, notifyFollowers, notifyMatches, notifyRenewal, ownerPost, postEstado, preparePublication, reconcileFollowedExpiries, rememberSearch, searchOrigin, searchPosts, serializePost, serializeSummaries } from "../queries";
 import { CATEGORIES, publicationBody, ZONES } from "../types";
-import { nowIso, pageResult, pageWindow, paginate, publicationExpiry } from "../utils";
+import { normalizeText, nowIso, pageResult, pageWindow, paginate, publicationExpiry } from "../utils";
 
 export function publicationRoutes(db: AppDatabase) {
   return new Elysia()
@@ -71,8 +71,8 @@ export function publicationRoutes(db: AppDatabase) {
         if (p.estado !== "abierta") throw new ApiError(409, "PUBLICATION_LOCKED", "Solo podés editar una publicación abierta");
         const next = preparePublication(tx, user.id, {
           ...p, clientId: undefined, ubicacion: { latitud: p.latitud, longitud: p.longitud }, ...body,
-          ...(body.barrio !== undefined && body.barrio !== p.barrio && body.ubicacion === undefined ? { ubicacion: null } : {}),
-        }, !(p.tipo === "encontrado" && !p.preguntaVerificacion));
+          ...(body.barrio !== undefined && normalizeText(body.barrio ?? "") !== normalizeText(p.barrio) && body.ubicacion === undefined ? { ubicacion: null } : {}),
+        }, !(p.tipo === "encontrado" && !p.preguntaVerificacion), { previous: p, body });
         tx.update(posts).set({ ...next, updatedAt: nowIso() }).where(eq(posts.id, p.id)).run();
         const updated = getPost(tx, p.id);
         notifyFollowers(tx, updated, `Se actualizó: ${updated.titulo}`);

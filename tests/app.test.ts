@@ -35,7 +35,7 @@ async function api(path: string, method = "GET", body?: unknown, token?: string)
 }
 function postBody(extra: Record<string, unknown> = {}) {
   return { tipo: "encontre", titulo: "Llaves con llavero azul", descripcion: "Juego de tres llaves con un llavero de color azul.",
-    categoria: "Llaves", barrio: "Palermo", fecha: localDate(), franja: "tarde", direccionExacta: "Calle privada 123", fotos: [],
+    categoria: "Llaves", barrio: "Palermo", fecha: localDate(), hora: "00:00", direccionExacta: "Calle privada 123", fotos: [],
     preguntaVerificacion: "¿Qué dibujo tiene el llavero?", respuestaVerificacion: "Una estrella azul", ...extra };
 }
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a++sAAAAASUVORK5CYII=", "base64");
@@ -1102,7 +1102,7 @@ describe("búsqueda: contrato de resultados", () => {
     const at = nowIso();
     db.insert(claims).values({ id: crypto.randomUUID(), publicationId: accepted, userId: claimant.id, mensaje: "Son mis llaves.", estado: "aceptado", createdAt: at, updatedAt: at }).run();
     const open = seed({ latitud: -34.588912, longitud: -58.430678 });
-    const keys = ["id", "tipo", "titulo", "descripcion", "categoria", "barrio", "fecha", "franja", "estado", "latitud", "longitud", "ubicacion", "fotos",
+    const keys = ["id", "tipo", "titulo", "descripcion", "categoria", "barrio", "fecha", "hora", "franja", "estado", "latitud", "longitud", "ubicacion", "fotos",
       "creadaEn", "actualizadaEn", "resueltaEn", "venceAt", "distancia"].sort();
     for (const token of [undefined, accounts[0]!.token, claimant.token, accounts[2]!.token]) {
       const items = (await api(query(), "GET", undefined, token)).data.items;
@@ -1340,7 +1340,7 @@ describe("listados paginados: contrato", () => {
     expect(Object.keys(all)).toEqual(["items", "page", "pageSize", "total", "totalPages"]);
     const estado = Object.fromEntries(all.items.map((x: any) => [x.id, x.estado]));
     expect(estado).toMatchObject({ "s-03": "vencida", "s-04": "abierta", "s-05": "en_reclamo", "s-06": "resuelta", "s-00": "abierta" });
-    expect(Object.keys(all.items[0]).sort()).toEqual(["id", "tipo", "titulo", "descripcion", "categoria", "barrio", "fecha", "franja", "estado",
+    expect(Object.keys(all.items[0]).sort()).toEqual(["id", "tipo", "titulo", "descripcion", "categoria", "barrio", "fecha", "hora", "franja", "estado",
       "latitud", "longitud", "ubicacion", "fotos", "creadaEn", "actualizadaEn", "resueltaEn", "venceAt"].sort());
     expect(JSON.stringify(all)).not.toContain("Calle privada");
     // Cada cuenta ve solo lo que sigue; sin seguidas la página es vacía con total 0.
@@ -1971,7 +1971,7 @@ describe("alertas geográficas: coherencia entre búsqueda y alerta", () => {
   const titles = new Map<string, string>();
   beforeEach(() => titles.clear());
   async function place(titulo: string, ubicacion: { latitud: number; longitud: number } | null, extra: Record<string, unknown> = {}, owner = OWNER) {
-    const created = await publish({ titulo, barrio: ubicacion ? "" : "Palermo", ...(ubicacion ? { ubicacion } : {}), fecha: TODAY, ...extra }, owner);
+    const created = await publish({ titulo, barrio: ubicacion ? "Almagro" : "Palermo", ...(ubicacion ? { ubicacion } : {}), fecha: TODAY, ...extra }, owner);
     titles.set(created.id, titulo);
     return created.id as string;
   }
@@ -2170,12 +2170,12 @@ describe("alertas geográficas: coherencia entre búsqueda y alerta", () => {
     test("avisa exactamente a las mismas alertas que el recorrido completo, con alertas de otra situación y categoría de por medio", async () => {
       populate(300);
       for (const extra of [
-        { titulo: "Llaves con llavero azul", barrio: "", ubicacion: north(1) },
+        { titulo: "Llaves con llavero azul", barrio: "Almagro", ubicacion: north(1) },
         { titulo: "Llaves en Palermo", barrio: "Pálermo" },
         { titulo: "Estrella azul", barrio: "Recoleta", descripcion: "Un llavero azul con una estrella roja." },
         { titulo: "Documentos", categoria: "Documentos", barrio: "Palermo" },
         { titulo: "Perdí una campera", tipo: "perdi", categoria: "Ropa", barrio: "Palermo", preguntaVerificacion: undefined, respuestaVerificacion: undefined },
-        { titulo: "Perdí unas llaves", tipo: "perdi", barrio: "", ubicacion: north(3), preguntaVerificacion: undefined, respuestaVerificacion: undefined },
+        { titulo: "Perdí unas llaves", tipo: "perdi", barrio: "Almagro", ubicacion: north(3), preguntaVerificacion: undefined, respuestaVerificacion: undefined },
       ]) {
         const created = await publish({ fecha: TODAY, ...extra });
         expect(notifiedAlerts(created.id)).toEqual(reference(stored(created.id)));
@@ -2593,12 +2593,12 @@ describe("Catálogo de categorías y barrios", () => {
     expect((await api("/health")).response.headers.get("x-catalogo-version")).toBeNull();
   });
 
-  test("el barrio publicado se guarda como se escribió y toma las coordenadas del centro del catálogo", async () => {
+  test("el barrio publicado se guarda con el nombre del catálogo y toma las coordenadas de su centro", async () => {
     const barrios = (await api("/barrios")).data as { nombre: string; latitud: number; longitud: number }[];
     const palermo = barrios.find((z) => z.nombre === "Palermo")!;
     const p = await publish({ barrio: "  PÁLERMO " });
     const row = db.select().from(posts).where(eq(posts.id, p.id)).get()!;
-    expect(row.barrio).toBe("PÁLERMO");
+    expect(row.barrio).toBe("Palermo");
     expect([row.latitud, row.longitud]).toEqual([palermo.latitud, palermo.longitud]);
     // El filtro textual ignora tildes y mayúsculas: encuentra la publicación con cualquier grafía.
     for (const zona of ["Palermo", "palermo", "PALERMO", "Pálermo"]) {
@@ -2606,22 +2606,31 @@ describe("Catálogo de categorías y barrios", () => {
     }
   });
 
-  test("GPS fuera del catálogo: no se infiere ningún barrio ni se reemplaza el elegido", async () => {
+  test("el barrio es obligatorio y del catálogo; con GPS vale el barrio elegido y se usan las coordenadas enviadas", async () => {
     const cordoba = { latitud: -31.4201, longitud: -64.1888 };
-    const p = await publish({ barrio: undefined, ubicacion: cordoba, titulo: "Llaves en Córdoba" });
-    expect(p.barrio).toBe("Ubicación actual");
-    const row = db.select().from(posts).where(eq(posts.id, p.id)).get()!;
-    expect([row.latitud, row.longitud]).toEqual([cordoba.latitud, cordoba.longitud]);
-    // Con un barrio y GPS a la vez, vale el GPS para el orden y el barrio queda como lo eligió la persona.
+    const code = async (extra: Record<string, unknown>) => {
+      const r = await api("/publicaciones", "POST", postBody(extra), accounts[0]!.token);
+      expect(r.response.status).toBe(422); return r.data.error.code;
+    };
+    expect(await code({ barrio: undefined, ubicacion: cordoba })).toBe("BARRIO_REQUIRED");
+    expect(await code({ barrio: "   " })).toBe("BARRIO_REQUIRED");
+    expect(await code({ barrio: null })).toBe("BARRIO_REQUIRED");
+    expect(await code({ barrio: "Ubicación actual", ubicacion: cordoba })).toBe("INVALID_BARRIO");
+    expect(await code({ barrio: "Villa Inventada" })).toBe("INVALID_BARRIO");
+    // Con un barrio y coordenadas a la vez, las coordenadas ubican el punto y el barrio queda como lo eligió la persona.
     const q = await publish({ barrio: "Palermo", ubicacion: cordoba, titulo: "Llaves GPS y barrio" });
     expect(q.barrio).toBe("Palermo");
-    // Búsqueda por GPS lejos de todo barrio: solo entra lo que cae dentro del radio.
+    const row = db.select().from(posts).where(eq(posts.id, q.id)).get()!;
+    expect([row.latitud, row.longitud]).toEqual([cordoba.latitud, cordoba.longitud]);
+    // Y se encuentra tanto por barrio como por GPS.
+    expect((await api(query())).data.items.map((i: any) => i.id)).toEqual([q.id]);
     const gps = await api(query({ zona: "", latitud: String(cordoba.latitud), longitud: String(cordoba.longitud), radioKm: "5" }));
-    expect(gps.data.items.map((i: any) => i.id).sort()).toEqual([p.id, q.id].sort());
-    expect((await api(query({ zona: "", latitud: "-34.5889", longitud: "-58.4306", radioKm: "5" }))).data.total).toBe(0);
-    // Un barrio fuera del catálogo sin coordenadas no se acepta ni se adivina.
-    const sinLugar = await api("/publicaciones", "POST", postBody({ barrio: "Villa Inventada" }), accounts[0]!.token);
-    expect(sinLugar.response.status).toBe(422); expect(sinLugar.data.error.code).toBe("LOCATION_REQUIRED");
+    expect(gps.data.items.map((i: any) => i.id)).toEqual([q.id]);
+    // Sin coordenadas se usa el centro del barrio (aquí, uno nuevo del catálogo).
+    const v = await publish({ barrio: "villa urquiza", titulo: "Llaves en Villa Urquiza" });
+    expect(v.barrio).toBe("Villa Urquiza");
+    const urquiza = (await api("/barrios")).data.find((z: any) => z.nombre === "Villa Urquiza");
+    expect([v.latitud, v.longitud]).toEqual([Math.round(urquiza.latitud * 1000) / 1000, Math.round(urquiza.longitud * 1000) / 1000]);
   });
 
   test("el centro del barrio solo ordena: «cercanos» no excluye a los lejanos y un barrio desconocido no ordena", async () => {
@@ -2864,8 +2873,8 @@ describe("recorridos de punta a punta (plan 008)", () => {
     const alerta = await send("/alertas", OTHER, { filtros: { situacion: "perdi", categoria: "Llaves", palabras: "", periodo: "semana", ubicacion: centro, radioKm: 1 } });
     expect(alerta.response.status).toBe(201); expect(alerta.data.filtros.radioKm).toBe(1);
 
-    const cerca = await publish({ titulo: "Llaves cerca", barrio: "", ubicacion: norte(0.4) });
-    const lejos = await publish({ titulo: "Llaves lejos", barrio: "", ubicacion: norte(3) });
+    const cerca = await publish({ titulo: "Llaves cerca", barrio: "Almagro", ubicacion: norte(0.4) });
+    const lejos = await publish({ titulo: "Llaves lejos", barrio: "Almagro", ubicacion: norte(3) });
     const params = new URLSearchParams({ situacion: "perdi", categoria: "Llaves", periodo: "semana", latitud: String(centro.latitud), longitud: String(centro.longitud), radioKm: "1" });
     expect((await get(`/publicaciones?${params}`, OTHER)).data.items.map((x: any) => x.id)).toEqual([cerca.id]);
     const avisos = (await get("/notificaciones", OTHER)).data.items.filter((n: any) => n.tipo === "coincidencia");
@@ -2909,5 +2918,150 @@ describe("recorridos de punta a punta (plan 008)", () => {
     db.update(posts).set({ resolvedAt: new Date(Date.now() - 6 * DAY).toISOString() }).where(eq(posts.id, ultima)).run();
     expect((await send(`/publicaciones/${ultima}/valoraciones`, OTHER, { positiva: true })).response.status).toBe(201);
     expect((await get(`/usuarios/${accounts[OWNER]!.id}`)).data.reputation.positiveReviews).toBe(1);
+  });
+});
+
+describe("publicación: barrio, dirección y hora", () => {
+  const ARGENTINA = "America/Argentina/Buenos_Aires";
+  let zone: string;
+  beforeEach(() => { zone = config.timeZone; (config as { timeZone: string }).timeZone = ARGENTINA; });
+  afterEach(() => { setSystemTime(); (config as { timeZone: string }).timeZone = zone; });
+  const ayer = () => localDate(new Date(Date.now() - 86_400_000));
+  const crear = (extra: Record<string, unknown>) => api("/publicaciones", "POST", postBody(extra), accounts[0]!.token);
+  const rechazo = async (extra: Record<string, unknown>) => { const r = await crear(extra); expect(r.response.status).toBe(422); return r.data.error.code; };
+  const legacy = (extra: Record<string, unknown> = {}) => {
+    const id = crypto.randomUUID(); const at = nowIso();
+    db.insert(posts).values({ id, userId: accounts[0]!.id, tipo: "perdido", titulo: "Llaves de antes", descripcion: "Publicación anterior a pedir la hora.",
+      categoria: "Llaves", barrio: "Barrio viejo", fecha: ayer(), franja: "tarde", latitud: -34.6, longitud: -58.4, direccionExacta: null, fotos: [],
+      createdAt: at, updatedAt: at, ...extra }).run();
+    return id;
+  };
+  const patch = (id: string, body: Record<string, unknown>) => api(`/publicaciones/${id}`, "PATCH", body, accounts[0]!.token);
+
+  test("la dirección exacta es obligatoria y no puede quedar vacía", async () => {
+    expect(await rechazo({ direccionExacta: undefined })).toBe("ADDRESS_REQUIRED");
+    expect(await rechazo({ direccionExacta: "   " })).toBe("ADDRESS_REQUIRED");
+    expect(await rechazo({ direccionExacta: null })).toBe("ADDRESS_REQUIRED");
+    const ok = await publish({ direccionExacta: "  Av. Santa Fe 1234  " });
+    expect(db.select().from(posts).where(eq(posts.id, ok.id)).get()!.direccionExacta).toBe("Av. Santa Fe 1234");
+  });
+
+  test("la hora es obligatoria, HH:MM de 24 h, y hoy no puede ser futura", async () => {
+    setSystemTime(new Date("2026-11-01T15:00:00Z")); // 12:00 en Buenos Aires
+    for (const hora of [undefined, null, "", "9:30", "24:00", "10:60", "10:30:00", "10-30", "ab:cd"]) {
+      expect(await rechazo({ hora })).toBe("INVALID_TIME");
+    }
+    expect(await rechazo({ hora: "12:01" })).toBe("INVALID_TIME");
+    expect((await crear({ hora: "12:00" })).response.status).toBe(201);
+    expect((await crear({ hora: "00:00", titulo: "Llaves a medianoche" })).response.status).toBe(201);
+    // Un día anterior no tiene tope horario.
+    expect((await crear({ fecha: ayer(), hora: "23:59", titulo: "Llaves de anoche" })).response.status).toBe(201);
+  });
+
+  test("la franja se deriva de la hora e ignora la que mande el cliente", async () => {
+    const casos: [string, string][] = [["00:00", "noche"], ["05:59", "noche"], ["06:00", "manana"], ["11:59", "manana"],
+      ["12:00", "tarde"], ["18:59", "tarde"], ["19:00", "noche"], ["23:59", "noche"]];
+    for (const [hora, franja] of casos) {
+      const p = await publish({ fecha: ayer(), hora, franja: franja === "tarde" ? "noche" : "tarde", titulo: `Llaves ${hora}` });
+      expect(p.franja).toBe(franja); expect(p.hora).toBe(hora);
+    }
+    const sinFranja = await crear({ fecha: ayer(), hora: "08:15", franja: undefined, titulo: "Llaves sin franja" });
+    expect(sinFranja.response.status).toBe(201); expect(sinFranja.data.franja).toBe("manana");
+  });
+
+  test("la hora figura en el resumen, el detalle y mis publicaciones, y es null en las viejas", async () => {
+    const p = await publish({ fecha: ayer(), hora: "10:30" });
+    expect(p.hora).toBe("10:30");
+    expect((await api(`/publicaciones/${p.id}`)).data.hora).toBe("10:30");
+    const viejo = legacy({ barrio: "Palermo", titulo: "Llaves viejas", tipo: "encontrado" });
+    expect((await api(`/publicaciones/${viejo}`)).data.hora).toBeNull();
+    const lista = (await api(query({ situacion: "perdi", periodo: "semana" }))).data.items;
+    expect(lista.find((i: any) => i.id === p.id).hora).toBe("10:30");
+    expect(lista.find((i: any) => i.id === viejo).hora).toBeNull();
+    expect((await api("/mis-publicaciones", "GET", undefined, accounts[0]!.token)).data.items.find((i: any) => i.id === viejo).hora).toBeNull();
+  });
+
+  test("editar: mismas reglas sobre el resultado, la hora recalcula la franja y no se puede vaciar", async () => {
+    const p = await publish({ fecha: ayer(), hora: "10:00" });
+    expect(p.franja).toBe("manana");
+    const r = await patch(p.id, { hora: "20:15" });
+    expect(r.response.status).toBe(200); expect(r.data.hora).toBe("20:15"); expect(r.data.franja).toBe("noche");
+    // Sin tocar la hora, la franja sigue la hora guardada aunque el cliente mande otra.
+    expect((await patch(p.id, { titulo: "Otro título", franja: "manana" })).data.franja).toBe("noche");
+    for (const hora of [null, "7:00", "99:99"]) {
+      const bad = await patch(p.id, { hora }); expect(bad.response.status).toBe(422); expect(bad.data.error.code).toBe("INVALID_TIME");
+    }
+    for (const direccionExacta of ["", "  ", null]) {
+      const bad = await patch(p.id, { direccionExacta }); expect(bad.response.status).toBe(422); expect(bad.data.error.code).toBe("ADDRESS_REQUIRED");
+    }
+    expect((await patch(p.id, { barrio: "Ubicación actual" })).data.error.code).toBe("INVALID_BARRIO");
+    expect((await patch(p.id, { barrio: "" })).data.error.code).toBe("BARRIO_REQUIRED");
+    // Hoy no admite una hora futura.
+    setSystemTime(new Date("2026-11-01T15:00:00Z"));
+    const hoy = await publish({ hora: "08:00", titulo: "Llaves de esta mañana" });
+    expect((await patch(hoy.id, { hora: "12:01" })).data.error.code).toBe("INVALID_TIME");
+    expect((await patch(hoy.id, { hora: "11:59" })).response.status).toBe(200);
+    // Mover la fecha a hoy con una hora ya cargada posterior a la actual también falla.
+    expect((await patch(p.id, { fecha: localDate() })).data.error.code).toBe("INVALID_TIME");
+  });
+
+  test("editar: el barrio nuevo toma el centro del catálogo y las coordenadas enviadas se respetan", async () => {
+    const p = await publish({ fecha: ayer() });
+    const recoleta = (await api("/barrios")).data.find((z: any) => z.nombre === "Recoleta");
+    const r = await patch(p.id, { barrio: "recoleta" });
+    expect(r.data.barrio).toBe("Recoleta");
+    const row = db.select().from(posts).where(eq(posts.id, p.id)).get()!;
+    expect([row.latitud, row.longitud]).toEqual([recoleta.latitud, recoleta.longitud]);
+    await patch(p.id, { barrio: "Belgrano", ubicacion: { latitud: -34.5, longitud: -58.5 } });
+    const moved = db.select().from(posts).where(eq(posts.id, p.id)).get()!;
+    expect(moved.barrio).toBe("Belgrano"); expect([moved.latitud, moved.longitud]).toEqual([-34.5, -58.5]);
+  });
+
+  test("editar una publicación vieja: sin dirección, hora ni barrio del catálogo se edita si el pedido no los toca", async () => {
+    const id = legacy();
+    const r = await patch(id, { titulo: "Llaves de antes, editada" });
+    expect(r.response.status).toBe(200);
+    expect(r.data.titulo).toBe("Llaves de antes, editada"); expect(r.data.hora).toBeNull();
+    expect(r.data.barrio).toBe("Barrio viejo"); expect(r.data.franja).toBe("tarde");
+    const row = db.select().from(posts).where(eq(posts.id, id)).get()!;
+    expect(row.direccionExacta).toBeNull(); expect([row.latitud, row.longitud]).toEqual([-34.6, -58.4]);
+    // Reenviar el mismo barrio fuera del catálogo tampoco falla; cambiarlo a otro que no está, sí.
+    expect((await patch(id, { barrio: "Barrio viejo" })).response.status).toBe(200);
+    expect((await patch(id, { barrio: "Otro barrio viejo" })).data.error.code).toBe("INVALID_BARRIO");
+    // Si el pedido sí trae la dirección o la hora, se validan como en el alta.
+    expect((await patch(id, { direccionExacta: "  " })).data.error.code).toBe("ADDRESS_REQUIRED");
+    expect((await patch(id, { hora: null })).data.error.code).toBe("INVALID_TIME");
+    expect((await patch(id, { hora: "25:00" })).data.error.code).toBe("INVALID_TIME");
+    const ok = await patch(id, { hora: "07:45", direccionExacta: "Calle 1", barrio: "Palermo" });
+    expect(ok.response.status).toBe(200); expect(ok.data.hora).toBe("07:45"); expect(ok.data.franja).toBe("manana");
+    // Ya cargada, la hora no se puede vaciar.
+    expect((await patch(id, { hora: null })).data.error.code).toBe("INVALID_TIME");
+  });
+
+  test("la migración pasa «Ubicación actual» al barrio más cercano del catálogo y deja la hora vacía", () => {
+    const folder = join(temp, "before-hora");
+    for (const name of readdirSync(new URL("../drizzle", import.meta.url))) {
+      if (name.startsWith("2026") && name < "20261101211124_publicacion_hora_barrio") cpSync(new URL(`../drizzle/${name}`, import.meta.url), join(folder, name), { recursive: true });
+    }
+    const path = join(temp, "before-hora.sqlite");
+    const raw = new Database(path, { create: true });
+    migrate(drizzle({ client: raw }), { migrationsFolder: folder });
+    const at = nowIso();
+    raw.run("INSERT INTO users (id,email,name,created_at,email_verified_at) VALUES ('o','o@example.com','Dueño',?,?)", [at, at]);
+    const insert = (id: string, barrio: string, lat: number, lon: number) => raw.run(
+      `INSERT INTO hallado_publications (id,user_id,tipo,titulo,descripcion,categoria,barrio,fecha,franja,latitud,longitud,fotos,estado,created_at,updated_at)
+       VALUES (?,'o','perdido','Llaves','Llaves perdidas hace tiempo','Llaves',?,'2026-10-01','tarde',?,?,'[]','abierta',?,?)`, [id, barrio, lat, lon, at, at]);
+    insert("belgrano", "Ubicación actual", -34.5640, -58.4560);
+    insert("laplata", "Ubicación actual", -34.9150, -57.9500);
+    insert("urquiza", "Ubicación actual", -34.5730, -58.4890);
+    insert("palermo", "Palermo", -34.5889, -58.4306);
+    insert("libre", "Texto libre", -34.6, -58.4);
+    raw.close();
+    const upgraded = createDatabase(path);
+    try {
+      const barrios = Object.fromEntries(upgraded.select().from(posts).all().map((p) => [p.id, [p.barrio, p.hora]]));
+      expect(barrios).toEqual({ belgrano: ["Belgrano", null], laplata: ["La Plata", null], urquiza: ["Villa Urquiza", null],
+        palermo: ["Palermo", null], libre: ["Texto libre", null] });
+    } finally { upgraded.$client.close(); }
   });
 });

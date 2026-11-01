@@ -81,7 +81,7 @@ Si una cuenta demo ya existía, se conserva su contraseña anterior. Las fotos d
 - Reputación calculada por devoluciones concretadas y valoraciones; insignia Vecino solidario al alcanzar cinco devoluciones.
 - Búsqueda del tipo opuesto, categoría, palabras sin distinción de tildes/mayúsculas, barrio, períodos/rango, coordenadas y radio.
 - Resultados paginados y ordenados por fecha o cercanía; hasta cinco búsquedas recientes por usuario.
-- Publicaciones perdidas/encontradas: creación, edición, eliminación lógica, fotos y gestión de estados.
+- Publicaciones perdidas/encontradas: creación, edición, eliminación lógica, fotos y gestión de estados. Barrio del catálogo (91 entradas: CABA y GBA), dirección exacta y hora `HH:MM` obligatorios; la franja se deriva de la hora.
 - Pregunta/respuesta de verificación del publicador (respuesta privada), reclamos con respuesta, foto de prueba privada y barrio, vencimiento a 30 días con renovación y alta idempotente por `clientId`.
 - Reclamos: crear, aceptar, rechazar, cancelar y resolver una devolución; un único aceptado por publicación.
 - Dirección exacta reservada al autor y al reclamante aceptado. Coordenadas públicas redondeadas a tres decimales; distancia redondeada a 0.1 km.

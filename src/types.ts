@@ -132,10 +132,13 @@ export const publicationBody = t.Object({
   titulo: t.String({ minLength: 3, maxLength: 80 }),
   descripcion: t.String({ minLength: 10, maxLength: 2000 }),
   categoria: categorySchema,
-  barrio: t.Optional(t.String({ maxLength: 100 })),
+  // Barrio, dirección y hora se exigen en `preparePublication` (con códigos propios), no en el esquema.
+  barrio: t.Optional(t.Union([t.String({ maxLength: 100 }), t.Null()])),
   ubicacion: t.Optional(t.Union([locationSchema, t.Null()])),
   fecha: t.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" }),
-  franja: t.Union([t.Literal("manana"), t.Literal("tarde"), t.Literal("noche")]),
+  hora: t.Optional(t.Union([t.String({ maxLength: 20 }), t.Null()])),
+  // Se ignora en el alta: la franja se deriva de la hora.
+  franja: t.Optional(t.Union([t.Literal("manana"), t.Literal("tarde"), t.Literal("noche")])),
   direccionExacta: t.Optional(t.Union([t.String({ maxLength: 250 }), t.Null()])),
   fotos: t.Optional(t.Array(t.String({ maxLength: 250 }), { maxItems: 5, uniqueItems: true })),
   // Verificación del publicador: obligatoria en "encontrado", se ignora en "perdido".

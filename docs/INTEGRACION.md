@@ -122,7 +122,7 @@ Ejemplo:
 
 Al usar GPS, enviar `latitud` y `longitud` como parámetros planos, no el objeto `ubicacion`. Con un barrio de la lista se usa su centro para ordenar por cercanía. Para localidades fuera de la lista, enviar coordenadas si se desea ese orden. La búsqueda pública devuelve solo publicaciones abiertas y vigentes (las vencidas no aparecen); el detalle sigue accesible al cambiar de estado.
 
-Cada resultado tiene `id, tipo, titulo, descripcion, categoria, barrio, fecha, franja, estado, fotos, latitud, longitud, ubicacion, distancia, creadaEn, actualizadaEn, resueltaEn, venceAt`.
+Cada resultado tiene `id, tipo, titulo, descripcion, categoria, barrio, fecha, hora, franja, estado, fotos, latitud, longitud, ubicacion, distancia, creadaEn, actualizadaEn, resueltaEn, venceAt`.
 
 `tipo` es **perdido/encontrado** en las respuestas. Al crear se aceptan también **perdi/encontre**, como manda hoy `CreatePostScreen`. `estado` es **abierta/en_reclamo/resuelta/vencida** (ver «Vencimiento y renovación»). La app usa `en_reclamo` tal como lo devuelve la API y toma `items` de la respuesta para paginar.
 
@@ -151,8 +151,8 @@ La app móvil no usa estos endpoints: guarda las búsquedas recientes en el disp
   "barrio": "Palermo",
   "ubicacion": { "latitud": -34.5889, "longitud": -58.4306 },
   "fecha": "2026-10-20",
-  "franja": "tarde",
-  "direccionExacta": "Dirección privada opcional",
+  "hora": "15:30",
+  "direccionExacta": "Av. Santa Fe 1234",
   "fotos": ["/uploads/uuid.png"],
   "preguntaVerificacion": "¿Qué dibujo tiene el llavero?",
   "respuestaVerificacion": "Una estrella azul",
@@ -169,8 +169,12 @@ La app móvil no usa estos endpoints: guarda las búsquedas recientes en el disp
 - `DELETE /publicaciones/:id`: eliminación lógica, solo el dueño y si está abierta. Se conserva la trazabilidad; no se puede eliminar una devolución resuelta.
 - `POST /publicaciones/:id/renovar`: solo el dueño; fija `venceAt` en ahora + 30 días y devuelve el detalle. 409 `PUBLICATION_LOCKED` si está resuelta, 404 si fue eliminada, 403 si no es el dueño.
 - `GET /mis-publicaciones`: propias, paginadas; filtro opcional `estado` (`abierta`, `en_reclamo`, `resuelta`, `vencida`; otro valor da 422).
-- Cambiar barrio sin coordenadas usa el centro del barrio de la lista. Con GPS y sin barrio se guarda la etiqueta "Ubicación actual". No se hace geocodificación externa.
-- `direccionExacta` es opcional porque la pantalla de creación actual no la pide. Si se quiere coordinar por una dirección concreta, se puede añadir ese campo en la app o enviar un mensaje privado después de aceptar.
+- `barrio` es **obligatorio** y debe ser uno de `GET /barrios` (se compara sin tildes ni mayúsculas y se guarda el nombre canónico): 422 `BARRIO_REQUIRED` si falta, 422 `INVALID_BARRIO` si no está en la lista. Ya no existe el valor "Ubicación actual". `ubicacion` es opcional: si viene, se guardan esas coordenadas junto con el barrio (sirven para el orden por cercanía y el radio); si no, se usa el centro del barrio. No se hace geocodificación externa.
+- `direccionExacta` es **obligatoria** y no puede quedar vacía tras recortar espacios (422 `ADDRESS_REQUIRED`). Sigue siendo privada: solo la ven el dueño y quien tiene el reclamo aceptado.
+- `hora` es **obligatoria**, formato `HH:MM` de 24 h (422 `INVALID_TIME` si falta o es inválida). Si `fecha` es hoy en la zona horaria del servidor, la hora no puede ser futura (422 `INVALID_TIME`). Todas las respuestas de publicación (resumen y detalle) incluyen `hora`, que es `null` en las publicaciones anteriores a este contrato.
+- `franja` (`manana`, `tarde`, `noche`) ya no es un dato del cliente: es opcional y se ignora. Siempre se deriva de `hora`: 06:00 a 11:59 `manana`, 12:00 a 18:59 `tarde`, el resto `noche`. En una edición se recalcula cuando el cuerpo trae `hora`.
+- `PATCH` aplica las mismas reglas sobre el resultado combinado, con excepciones para publicaciones viejas: si la fila no tenía `direccionExacta` u `hora` y el cuerpo no las trae, no se exigen; una publicación con un barrio fuera de la lista se puede editar mientras no se cambie el barrio. Una `hora` cargada no se puede vaciar. Cambiar el barrio sin enviar `ubicacion` reubica la publicación en el centro del nuevo barrio.
+- Migración: las publicaciones con barrio "Ubicación actual" pasaron al barrio del catálogo más cercano a sus coordenadas (distancia euclídea sobre latitud y longitud), así aparecen al buscar por barrio. Su `hora` queda en `null`.
 
 ## Vencimiento y renovación
 

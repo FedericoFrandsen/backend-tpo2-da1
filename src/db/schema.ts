@@ -15,6 +15,8 @@ export const halladoPublications = sqliteTable("hallado_publications", {
   barrio: text("barrio").notNull(),
   fecha: text("fecha").notNull(),
   franja: text("franja", { enum: ["manana", "tarde", "noche"] }).notNull(),
+  // HH:MM de 24 h; null en las publicaciones anteriores a que se pidiera.
+  hora: text("hora"),
   latitud: real("latitud").notNull(),
   longitud: real("longitud").notNull(),
   direccionExacta: text("direccion_exacta"),

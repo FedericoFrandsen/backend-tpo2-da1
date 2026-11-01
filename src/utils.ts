@@ -21,6 +21,21 @@ export function localDate(date = new Date(), timeZone: string = config.timeZone)
   const parts = formatter.formatToParts(date);
   return ["year", "month", "day"].map((p) => parts.find((v) => v.type === p)!.value).join("-");
 }
+const timeFormatters = new Map<string, Intl.DateTimeFormat>();
+/** Hora local HH:MM (24 h) de un instante en el huso dado. */
+export function localTime(date = new Date(), timeZone: string = config.timeZone) {
+  let formatter = timeFormatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    timeFormatters.set(timeZone, formatter);
+  }
+  const parts = formatter.formatToParts(date);
+  return ["hour", "minute"].map((p) => parts.find((v) => v.type === p)!.value).join(":");
+}
+/** Franja del día de una hora HH:MM: 06:00-11:59 mañana, 12:00-18:59 tarde, el resto noche. */
+export function franjaDeHora(hora: string) {
+  return hora >= "06:00" && hora < "12:00" ? "manana" as const : hora >= "12:00" && hora < "19:00" ? "tarde" as const : "noche" as const;
+}
 const HOUR = 60 * 60 * 1000;
 /** Primer instante (ISO) cuya fecha local es `day` o posterior. Fuera de 1000..9999 no hay límite que aplicar a fechas ISO. */
 function localDayStartIso(day: string, timeZone: string) {

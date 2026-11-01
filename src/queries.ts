@@ -5,7 +5,7 @@ import { alerts, claims, follows, halladoPublications as posts, halladoReviews, 
 import { ApiError } from "./errors";
 import { config } from "./config";
 import { CATEGORIES, ZONES, type PublicationBody, type SearchFilters } from "./types";
-import { cleanText, distanceKm, localDate, normalizeText, nowIso, pageOptions, paginate, requireDate } from "./utils";
+import { cleanText, distanceKm, franjaDeHora, localDate, localTime, normalizeText, nowIso, pageOptions, paginate, requireDate } from "./utils";
 
 export type Post = typeof posts.$inferSelect;
 export type Claim = typeof claims.$inferSelect;
@@ -125,7 +125,7 @@ export function privateProfile(db: Store, userId: string) {
 export function serializePost(db: Store, p: Post, viewerId?: string, detail = false, estado = postEstado(db, p)) {
   const summary = {
     id: p.id, tipo: p.tipo, titulo: p.titulo, descripcion: p.descripcion,
-    categoria: p.categoria, barrio: p.barrio, fecha: p.fecha, franja: p.franja,
+    categoria: p.categoria, barrio: p.barrio, fecha: p.fecha, hora: p.hora ?? null, franja: p.franja,
     estado,
   };
   const dates = { creadaEn: p.createdAt, actualizadaEn: p.updatedAt, resueltaEn: p.resolvedAt, venceAt: p.venceAt || null };
@@ -366,14 +366,39 @@ export function zoneName(value: string) {
   return ZONES.find((z) => normalizeText(z.nombre) === normalizeText(value))?.nombre;
 }
 
-/** `requireVerification`: al crear un hallazgo la pregunta y la respuesta son obligatorias (al editar, salvo hallazgos previos sin pregunta). */
-export function preparePublication(db: Store, userId: string, input: PublicationBody, requireVerification = true) {
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+/**
+ * Valida y normaliza una publicación. `requireVerification`: al crear un hallazgo la pregunta y la respuesta son obligatorias
+ * (al editar, salvo hallazgos previos sin pregunta). En una edición, `edit.previous` es la fila y `edit.body` lo que trajo el
+ * pedido: una publicación vieja sin dirección u hora no las necesita mientras el pedido no las toque, ni se le exige un barrio
+ * del catálogo mientras no lo cambie.
+ */
+export function preparePublication(db: Store, userId: string, input: PublicationBody, requireVerification = true,
+  edit?: { previous: Post; body: Partial<PublicationBody> }) {
   const titulo = cleanText(input.titulo, 3, "título");
   const descripcion = cleanText(input.descripcion, 10, "descripción");
   requireDate(input.fecha);
-  const barrio = (input.barrio ?? "").trim();
-  const coord = input.ubicacion ?? ZONES.find((z) => normalizeText(z.nombre) === normalizeText(barrio));
+  const barrioIngresado = (input.barrio ?? "").trim();
+  if (!barrioIngresado) throw new ApiError(422, "BARRIO_REQUIRED", "Elegí un barrio de la lista");
+  const unchanged = !!edit && normalizeText(barrioIngresado) === normalizeText(edit.previous.barrio);
+  const barrio = zoneName(barrioIngresado) ?? (unchanged ? edit.previous.barrio : undefined);
+  if (!barrio) throw new ApiError(422, "INVALID_BARRIO", "Elegí un barrio de la lista");
+  const coord = input.ubicacion ?? ZONES.find((z) => z.nombre === barrio)
+    ?? (edit ? { latitud: edit.previous.latitud, longitud: edit.previous.longitud } : undefined);
   if (!coord) throw new ApiError(422, "LOCATION_REQUIRED", "Elegí un barrio de la lista o enviá las coordenadas");
+  const direccionExacta = input.direccionExacta?.trim() || null;
+  if (!direccionExacta && !(edit && edit.previous.direccionExacta == null && edit.body.direccionExacta === undefined)) {
+    throw new ApiError(422, "ADDRESS_REQUIRED", "Indicá la dirección exacta donde pasó");
+  }
+  // Una publicación vieja sin hora la conserva sin hora mientras el pedido no la toque.
+  const legacyTime = !!edit && edit.previous.hora == null && edit.body.hora === undefined;
+  const hora = legacyTime ? null : input.hora ?? null;
+  if (!legacyTime) {
+    if (hora === null || !TIME.test(hora)) throw new ApiError(422, "INVALID_TIME", "Indicá la hora en formato HH:MM (24 h)");
+    if (input.fecha === localDate() && hora > localTime()) throw new ApiError(422, "INVALID_TIME", "La hora no puede ser futura");
+  }
+  // La franja sale siempre de la hora; solo una publicación vieja sin hora conserva la que tenía (o la que mande el cliente).
+  const franja = hora ? franjaDeHora(hora) : edit!.body.franja ?? edit!.previous.franja;
   const fotos = input.fotos ?? [];
   for (const url of fotos) {
     if (!IMAGE_URL.test(url)) {
@@ -397,9 +422,9 @@ export function preparePublication(db: Store, userId: string, input: Publication
   }
   return {
     tipo,
-    titulo, descripcion, categoria: input.categoria, barrio: barrio || "Ubicación actual",
-    fecha: input.fecha, franja: input.franja, latitud: coord.latitud, longitud: coord.longitud,
-    direccionExacta: input.direccionExacta?.trim() || null, fotos,
+    titulo, descripcion, categoria: input.categoria, barrio,
+    fecha: input.fecha, hora, franja, latitud: coord.latitud, longitud: coord.longitud,
+    direccionExacta, fotos,
     preguntaVerificacion, respuestaVerificacion,
   };
 }

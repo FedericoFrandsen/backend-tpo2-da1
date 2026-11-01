@@ -35,7 +35,7 @@ try {
             tx.insert(posts).values({
               id: `demo-${ci}-${zi}-${tipo}-${day}`, userId: ids[(ci + zi + day) % ids.length]!, tipo,
               titulo: titles[ci]!, descripcion: `${titles[ci]}. Publicación de demostración para probar Hallado.`,
-              categoria, barrio: z.nombre, fecha: date.toISOString().slice(0, 10), franja: "tarde",
+              categoria, barrio: z.nombre, fecha: date.toISOString().slice(0, 10), hora: "15:30", franja: "tarde",
               latitud: z.latitud + day * 0.001, longitud: z.longitud, direccionExacta: "Dirección ficticia 123", fotos: [],
               ...(tipo === "encontrado" ? { preguntaVerificacion: "¿Qué detalle distintivo tiene?", respuestaVerificacion: "Una marca azul" } : {}),
               createdAt: now, updatedAt: now,
@@ -50,7 +50,7 @@ try {
       tx.insert(posts).values({
         id, userId: ids[0]!, tipo: "encontrado", titulo: `Devolución de ejemplo ${i + 1}`,
         descripcion: "Objeto devuelto a su dueño en los datos de demostración.", categoria: "Otros", barrio: "Palermo",
-        fecha: localDate(), franja: "manana", latitud: ZONES[1]!.latitud, longitud: ZONES[1]!.longitud,
+        fecha: localDate(), hora: "09:30", franja: "manana", latitud: ZONES[1]!.latitud, longitud: ZONES[1]!.longitud,
         estado: "resuelta", resolvedAt: now, createdAt: now, updatedAt: now,
         preguntaVerificacion: "¿De qué color es?", respuestaVerificacion: "Negro",
       }).onConflictDoNothing().run();
