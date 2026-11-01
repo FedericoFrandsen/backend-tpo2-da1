@@ -1,0 +1,1 @@
+CREATE INDEX `hallado_alerta_candidatas_idx` ON `hallado_alerts` (json_extract("filtros", '$.categoria'),json_extract("filtros", '$.situacion'),`activa`);

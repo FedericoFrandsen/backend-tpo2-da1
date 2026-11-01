@@ -115,7 +115,12 @@ export const alerts = sqliteTable("hallado_alerts", {
   filtros: text("filtros", { mode: "json" }).$type<import("../types").SearchFilters>().notNull(),
   activa: integer("activa", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at").notNull(),
-}, (t) => [uniqueIndex("hallado_alerta_unique").on(t.userId, t.clave)]);
+}, (t) => [
+  uniqueIndex("hallado_alerta_unique").on(t.userId, t.clave),
+  // Alertas candidatas de una publicación: igualdad exacta por categoría y situación (campos del JSON de filtros) y activa.
+  // La expresión debe escribirse igual en la consulta (`queries.ts`) para que SQLite use el índice.
+  index("hallado_alerta_candidatas_idx").on(sql`json_extract(${t.filtros}, '$.categoria')`, sql`json_extract(${t.filtros}, '$.situacion')`, t.activa),
+]);
 
 export const searchHistory = sqliteTable("hallado_search_history", {
   id: text("id").primaryKey(),

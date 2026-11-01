@@ -11,6 +11,7 @@ import { createDatabase } from "../src/database";
 import { createSession } from "../src/auth";
 import { alerts, claims, follows, halladoPublications as posts, halladoReviews, loginAttempts, notifications, otpCodes, sessions, thanks, users } from "../src/db/schema";
 import { distanceKm, localDate, localDayBounds, nowIso } from "../src/utils";
+import { matchesLive } from "../src/queries";
 import { config } from "../src/config";
 import { sendOtp } from "../src/mailer";
 
@@ -2108,6 +2109,128 @@ describe("alertas geográficas: coherencia entre búsqueda y alerta", () => {
     expect((await api("/notificaciones", "GET", undefined, token(OWNER))).data.total).toBe(1);
     expect((await api("/notificaciones", "GET", undefined, token(SEEKER))).data.total).toBe(1);
     expect((await api("/notificaciones", "GET", undefined, token(OTHER))).data.total).toBe(5);
+  });
+
+  describe("selección de alertas candidatas al publicar", () => {
+    type Statement = { sql: string; rows: number; params: unknown[] };
+    const CATEGORIAS = ["Llaves", "Documentos", "Ropa"];
+    const PUBLISHER = OWNER;
+
+    /** Muchas alertas de otras personas, de todos los tipos que mira el matcher: situación, categoría, lugar, palabras, período y pausa. */
+    function populate(total: number) {
+      const people = Array.from({ length: 30 }, (_, n) => {
+        const id = `candidata-${n}`;
+        db.insert(users).values({ id, email: `${id}@example.com`, passwordHash, name: id, zone: "Palermo", createdAt: nowIso(), emailVerifiedAt: nowIso() }).run();
+        return id;
+      });
+      const owners = [...people, accounts[SEEKER]!.id, accounts[OTHER]!.id, accounts[PUBLISHER]!.id];
+      const places = [
+        { zona: "Palermo", ubicacion: null }, { zona: "palermo", ubicacion: null }, { zona: "PÁLERMO", ubicacion: null },
+        { zona: "Recoleta", ubicacion: null }, { zona: "", ubicacion: ORIGIN, radioKm: 0.5 }, { zona: "", ubicacion: ORIGIN, radioKm: 5 },
+        { zona: "", ubicacion: north(40), radioKm: 10 }, { zona: "", ubicacion: north(3), radioKm: 2 },
+      ];
+      const periods = [{ periodo: "semana" }, { periodo: "hoy" }, { periodo: "tresDias" },
+        { periodo: "rango", desde: day(-30), hasta: day(-20) }, { periodo: "rango", desde: day(-1), hasta: day(1) }];
+      const words = ["", "azul", "azul llavero", "rojo", "ESTRELLA"];
+      for (let i = 0; i < total; i++) {
+        const lugar = places[i % places.length]!;
+        const filtros = { situacion: i % 3 === 0 ? "encontre" : "perdi", categoria: CATEGORIAS[(i + Math.floor(i / 3)) % CATEGORIAS.length]!,
+          palabras: words[(i * 3) % words.length]!, ...periods[(i * 11) % periods.length]!, ...lugar };
+        db.insert(alerts).values({ id: `cand-${i}`, userId: owners[i % owners.length]!, clave: `cand-${i}`, filtros: filtros as any,
+          activa: i % 7 !== 0, createdAt: nowIso() }).run();
+      }
+    }
+    /** Lo que avisaba el recorrido completo: todas las alertas activas ajenas que pasan `matchesLive`. */
+    function reference(post: typeof posts.$inferSelect) {
+      return db.select().from(alerts).where(eq(alerts.activa, true)).all()
+        .filter((a) => a.userId !== post.userId && matchesLive(db, post, a.filtros)).map((a) => a.id).sort();
+    }
+    const notifiedAlerts = (postId: string) => db.select().from(notifications).where(eq(notifications.publicationId, postId)).all()
+      .filter((n) => n.tipo === "coincidencia").map((n) => n.alertId!).sort();
+    /** Ejecuta `action` contando las filas que SQLite entrega de la tabla de alertas. */
+    async function alertRowsRead(action: () => Promise<unknown>) {
+      const statements: Statement[] = [];
+      const original = db.$client.query.bind(db.$client);
+      (db.$client as any).query = (text: string) => {
+        const statement: any = original(text);
+        return new Proxy(statement, { get(target, prop) {
+          const value = target[prop];
+          if (typeof value !== "function") return value;
+          if (prop === "all" || prop === "values") return (...args: unknown[]) => { const rows = value.apply(target, args); statements.push({ sql: text, rows: rows.length, params: args }); return rows; };
+          if (prop === "get") return (...args: unknown[]) => { const row = value.apply(target, args); statements.push({ sql: text, rows: row == null ? 0 : 1, params: args }); return row; };
+          return value.bind(target);
+        } });
+      };
+      try { await action(); } finally { (db.$client as any).query = original; }
+      const selects = statements.filter((s) => /from "hallado_alerts"/i.test(s.sql) && /^\s*select/i.test(s.sql));
+      return { rows: selects.reduce((n, s) => n + s.rows, 0), selects };
+    }
+    const stored = (id: string) => db.select().from(posts).where(eq(posts.id, id)).get()!;
+
+    test("avisa exactamente a las mismas alertas que el recorrido completo, con alertas de otra situación y categoría de por medio", async () => {
+      populate(300);
+      for (const extra of [
+        { titulo: "Llaves con llavero azul", barrio: "", ubicacion: north(1) },
+        { titulo: "Llaves en Palermo", barrio: "Pálermo" },
+        { titulo: "Estrella azul", barrio: "Recoleta", descripcion: "Un llavero azul con una estrella roja." },
+        { titulo: "Documentos", categoria: "Documentos", barrio: "Palermo" },
+        { titulo: "Perdí una campera", tipo: "perdi", categoria: "Ropa", barrio: "Palermo", preguntaVerificacion: undefined, respuestaVerificacion: undefined },
+        { titulo: "Perdí unas llaves", tipo: "perdi", barrio: "", ubicacion: north(3), preguntaVerificacion: undefined, respuestaVerificacion: undefined },
+      ]) {
+        const created = await publish({ fecha: TODAY, ...extra });
+        expect(notifiedAlerts(created.id)).toEqual(reference(stored(created.id)));
+      }
+    });
+
+    test("hay avisos en el caso general y ninguno cuando nada coincide", async () => {
+      populate(300);
+      const hits = stored((await publish({ fecha: TODAY, titulo: "Llaves con llavero azul", barrio: "Palermo" })).id);
+      expect(reference(hits).length).toBeGreaterThan(5);
+      expect(notifiedAlerts(hits.id)).toEqual(reference(hits));
+      const none = stored((await publish({ fecha: TODAY, titulo: "Mascotas", categoria: "Mascotas", barrio: "Palermo" })).id);
+      expect(reference(none)).toEqual([]);
+      expect(notifiedAlerts(none.id)).toEqual([]);
+    });
+
+    test("editar avisa a las alertas que ahora coinciden, sin repetir las ya avisadas", async () => {
+      populate(240);
+      const created = await publish({ fecha: TODAY, titulo: "Cartera", categoria: "Ropa", barrio: "Belgrano" });
+      const first = notifiedAlerts(created.id);
+      expect(first).toEqual(reference(stored(created.id)));
+      const edit = await api(`/publicaciones/${created.id}`, "PATCH", { categoria: "Llaves", barrio: "Palermo" }, token(OWNER));
+      expect(edit.response.status).toBe(200);
+      const after = notifiedAlerts(created.id);
+      // Lo avisado antes no se retira; todo lo que ahora coincide quedó avisado, una sola vez.
+      expect(after).toEqual([...new Set([...first, ...reference(stored(created.id))])].sort());
+      expect(new Set(after).size).toBe(after.length);
+      expect(after.length).toBeGreaterThan(first.length);
+    });
+
+    test("solo materializa alertas de la categoría y la situación opuesta, no todas las activas", async () => {
+      populate(300);
+      const active = db.select().from(alerts).where(eq(alerts.activa, true)).all();
+      // Publicar un hallazgo de Llaves solo puede interesar a quien perdió Llaves.
+      const candidates = active.filter((a) => a.filtros.categoria === "Llaves" && a.filtros.situacion === "perdi" && a.userId !== accounts[PUBLISHER]!.id);
+      expect(active.length).toBeGreaterThan(200);
+      expect(candidates.length).toBeGreaterThan(10);
+      let created: any;
+      const { rows: read, selects } = await alertRowsRead(async () => { created = await publish({ fecha: TODAY, titulo: "Llaves con llavero azul", barrio: "Palermo" }); });
+      expect(notifiedAlerts(created.id)).toEqual(reference(stored(created.id)));
+      expect(read).toBeLessThanOrEqual(candidates.length);
+      expect(read).toBeLessThan(active.length / 2);
+      // La consulta real de candidatas sale del índice de expresión, no recorre la tabla de alertas.
+      const plan = selects.flatMap((s) => (db.$client.query("EXPLAIN QUERY PLAN " + s.sql).all(...(s.params as any[])) as { detail: string }[]).map((x) => x.detail)).join("; ");
+      expect(plan).toContain("hallado_alerta_candidatas_idx");
+      expect(plan).not.toMatch(/SCAN hallado_alerts/);
+    });
+
+    test("la selección usa el índice de categoría y situación de las alertas, sin recorrer la tabla", () => {
+      populate(300);
+      const plan = (db.$client.query(`EXPLAIN QUERY PLAN SELECT * FROM hallado_alerts WHERE json_extract(filtros, '$.categoria') = ? AND json_extract(filtros, '$.situacion') = ? AND activa = ? AND user_id <> ?`)
+        .all("Llaves", "perdi", 1, "x") as { detail: string }[]).map((r) => r.detail).join("; ");
+      expect(plan).toContain("hallado_alerta_candidatas_idx");
+      expect(plan).not.toMatch(/SCAN hallado_alerts/);
+    });
   });
 
   test("publicar y editar: entrar al radio avisa una vez; seguir editando, salir y volver a entrar no repite", async () => {

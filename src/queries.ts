@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gt, gte, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { union } from "drizzle-orm/sqlite-core";
 import type { Store } from "./database";
 import { alerts, claims, follows, halladoPublications as posts, halladoReviews, notifications, searchHistory, uploads, users } from "./db/schema";
@@ -444,9 +444,25 @@ export function reconcileFollowedExpiries(db: Store, userId: string) {
     }
   }
 }
+/**
+ * Alertas activas de otras personas que pueden interesarse en la publicación: misma categoría y la situación opuesta.
+ * Es igualdad exacta sobre el JSON de filtros, resuelta por `hallado_alerta_candidatas_idx` (la expresión tiene que ser la misma
+ * que la del índice). Es solo una preselección: no usa LIMIT y deja la comparación completa (barrio sin tildes, radio exacto,
+ * palabras, fechas y vigencia) para `matchesLive`, que es la regla que comparten la búsqueda y la reanudación de alertas.
+ */
+function candidateAlerts(db: Store, post: Post) {
+  return db.select().from(alerts).where(and(
+    sql`json_extract(${alerts.filtros}, '$.categoria') = ${post.categoria}`,
+    sql`json_extract(${alerts.filtros}, '$.situacion') = ${post.tipo === "encontrado" ? "perdi" : "encontre"}`,
+    eq(alerts.activa, true), ne(alerts.userId, post.userId))).all();
+}
+/**
+ * Avisa a las alertas que coinciden con la publicación (una vez por alerta y publicación). El trabajo es proporcional a las
+ * candidatas de su categoría y situación, no a todas las alertas activas; si todas coinciden, sigue siendo alto.
+ */
 export function notifyMatches(db: Store, post: Post) {
-  for (const a of db.select().from(alerts).where(eq(alerts.activa, true)).all()) {
-    if (a.userId !== post.userId && matchesLive(db, post, a.filtros)) {
+  for (const a of candidateAlerts(db, post)) {
+    if (matchesLive(db, post, a.filtros)) {
       notify(db, a.userId, "coincidencia", `Hay una coincidencia: ${post.titulo}`, {
         publicationId: post.id, alertId: a.id, dedupeKey: `alert:${a.id}:${post.id}`,
       });

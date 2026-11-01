@@ -1,0 +1,3278 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "2b0b1670-49ac-4329-8626-998b9ad1e442",
+  "prevIds": [
+    "b9f2071a-5849-47cf-b3a5-88c6513b02fd"
+  ],
+  "ddl": [
+    {
+      "name": "hallado_alerts",
+      "entityType": "tables"
+    },
+    {
+      "name": "hallado_claims",
+      "entityType": "tables"
+    },
+    {
+      "name": "hallado_encounters",
+      "entityType": "tables"
+    },
+    {
+      "name": "favorites",
+      "entityType": "tables"
+    },
+    {
+      "name": "hallado_follows",
+      "entityType": "tables"
+    },
+    {
+      "name": "hallado_publications",
+      "entityType": "tables"
+    },
+    {
+      "name": "hallado_reviews",
+      "entityType": "tables"
+    },
+    {
+      "name": "hallado_login_attempts",
+      "entityType": "tables"
+    },
+    {
+      "name": "hallado_messages",
+      "entityType": "tables"
+    },
+    {
+      "name": "hallado_notifications",
+      "entityType": "tables"
+    },
+    {
+      "name": "offers",
+      "entityType": "tables"
+    },
+    {
+      "name": "operations",
+      "entityType": "tables"
+    },
+    {
+      "name": "otp_codes",
+      "entityType": "tables"
+    },
+    {
+      "name": "publication_images",
+      "entityType": "tables"
+    },
+    {
+      "name": "publications",
+      "entityType": "tables"
+    },
+    {
+      "name": "questions",
+      "entityType": "tables"
+    },
+    {
+      "name": "reviews",
+      "entityType": "tables"
+    },
+    {
+      "name": "saved_searches",
+      "entityType": "tables"
+    },
+    {
+      "name": "hallado_search_history",
+      "entityType": "tables"
+    },
+    {
+      "name": "sessions",
+      "entityType": "tables"
+    },
+    {
+      "name": "hallado_thanks",
+      "entityType": "tables"
+    },
+    {
+      "name": "hallado_uploads",
+      "entityType": "tables"
+    },
+    {
+      "name": "users",
+      "entityType": "tables"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "hallado_alerts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "hallado_alerts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "clave",
+      "entityType": "columns",
+      "table": "hallado_alerts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "filtros",
+      "entityType": "columns",
+      "table": "hallado_alerts"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "true",
+      "generated": null,
+      "name": "activa",
+      "entityType": "columns",
+      "table": "hallado_alerts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "hallado_alerts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "hallado_claims"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "hallado_claims"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "hallado_claims"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mensaje",
+      "entityType": "columns",
+      "table": "hallado_claims"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "respuesta_verificacion",
+      "entityType": "columns",
+      "table": "hallado_claims"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "foto_prueba",
+      "entityType": "columns",
+      "table": "hallado_claims"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "barrio",
+      "entityType": "columns",
+      "table": "hallado_claims"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'pendiente'",
+      "generated": null,
+      "name": "estado",
+      "entityType": "columns",
+      "table": "hallado_claims"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "1",
+      "generated": null,
+      "name": "intentos",
+      "entityType": "columns",
+      "table": "hallado_claims"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "hallado_claims"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "hallado_claims"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "hallado_encounters"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "claim_id",
+      "entityType": "columns",
+      "table": "hallado_encounters"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "intento",
+      "entityType": "columns",
+      "table": "hallado_encounters"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "direccion",
+      "entityType": "columns",
+      "table": "hallado_encounters"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "propuesto_por",
+      "entityType": "columns",
+      "table": "hallado_encounters"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'pendiente'",
+      "generated": null,
+      "name": "estado",
+      "entityType": "columns",
+      "table": "hallado_encounters"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "hallado_encounters"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "favorites"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "favorites"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "saved_price_cents",
+      "entityType": "columns",
+      "table": "favorites"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "has_update",
+      "entityType": "columns",
+      "table": "favorites"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "favorites"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "hallado_follows"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "hallado_follows"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "hallado_follows"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "tipo",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "titulo",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "descripcion",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "categoria",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "barrio",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "fecha",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "franja",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "real",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "latitud",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "real",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "longitud",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "direccion_exacta",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'[]'",
+      "generated": null,
+      "name": "fotos",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'abierta'",
+      "generated": null,
+      "name": "estado",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pregunta_verificacion",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "respuesta_verificacion",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "client_id",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "vence_at",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "resolved_at",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "deleted_at",
+      "entityType": "columns",
+      "table": "hallado_publications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "hallado_reviews"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "hallado_reviews"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reviewer_id",
+      "entityType": "columns",
+      "table": "hallado_reviews"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reviewed_user_id",
+      "entityType": "columns",
+      "table": "hallado_reviews"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "positiva",
+      "entityType": "columns",
+      "table": "hallado_reviews"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "''",
+      "generated": null,
+      "name": "comentario",
+      "entityType": "columns",
+      "table": "hallado_reviews"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "hallado_reviews"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "login",
+      "entityType": "columns",
+      "table": "hallado_login_attempts"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "attempts",
+      "entityType": "columns",
+      "table": "hallado_login_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "window_start",
+      "entityType": "columns",
+      "table": "hallado_login_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "hallado_messages"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "claim_id",
+      "entityType": "columns",
+      "table": "hallado_messages"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "sender_id",
+      "entityType": "columns",
+      "table": "hallado_messages"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "texto",
+      "entityType": "columns",
+      "table": "hallado_messages"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "hallado_messages"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "hallado_notifications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "hallado_notifications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "tipo",
+      "entityType": "columns",
+      "table": "hallado_notifications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mensaje",
+      "entityType": "columns",
+      "table": "hallado_notifications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "hallado_notifications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "claim_id",
+      "entityType": "columns",
+      "table": "hallado_notifications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "alert_id",
+      "entityType": "columns",
+      "table": "hallado_notifications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "dedupe_key",
+      "entityType": "columns",
+      "table": "hallado_notifications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "read_at",
+      "entityType": "columns",
+      "table": "hallado_notifications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "hallado_notifications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "buyer_id",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "amount_cents",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "message",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "counter_amount_cents",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "buyer_has_update",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "seller_has_update",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "offers"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "offer_id",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "buyer_id",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "seller_id",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "amount_cents",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "completed_at",
+      "entityType": "columns",
+      "table": "operations"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "email",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "purpose",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "code_hash",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "attempts",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "consumed_at",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "otp_codes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "publication_images"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "publication_images"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "url",
+      "entityType": "columns",
+      "table": "publication_images"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "position",
+      "entityType": "columns",
+      "table": "publication_images"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "seller_id",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "title",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "description",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "category",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "price_cents",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "item_condition",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "address",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "published_at",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "publications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "asker_id",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "text",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "answer",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "answered_at",
+      "entityType": "columns",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "operation_id",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reviewer_id",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reviewed_user_id",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "rating",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "comment",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "reviews"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "query_text",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "category",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "min_price_cents",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "max_price_cents",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "item_condition",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "zone",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'recent'",
+      "generated": null,
+      "name": "sort",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "unread_count",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_checked_at",
+      "entityType": "columns",
+      "table": "saved_searches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "hallado_search_history"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "hallado_search_history"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "clave",
+      "entityType": "columns",
+      "table": "hallado_search_history"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "filtros",
+      "entityType": "columns",
+      "table": "hallado_search_history"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "hallado_search_history"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "token_hash",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "hallado_thanks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "publication_id",
+      "entityType": "columns",
+      "table": "hallado_thanks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "author_id",
+      "entityType": "columns",
+      "table": "hallado_thanks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "recipient_id",
+      "entityType": "columns",
+      "table": "hallado_thanks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mensaje",
+      "entityType": "columns",
+      "table": "hallado_thanks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "hallado_thanks"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "filename",
+      "entityType": "columns",
+      "table": "hallado_uploads"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "hallado_uploads"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "content_type",
+      "entityType": "columns",
+      "table": "hallado_uploads"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'imagen'",
+      "generated": null,
+      "name": "tipo",
+      "entityType": "columns",
+      "table": "hallado_uploads"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "hallado_uploads"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "email",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "username",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "password_hash",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "phone",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "share_phone",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "zone",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "avatar_url",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "email_verified_at",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_alerts_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "hallado_alerts"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "hallado_publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_claims_publication_id_hallado_publications_id_fk",
+      "entityType": "fks",
+      "table": "hallado_claims"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_claims_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "hallado_claims"
+    },
+    {
+      "columns": [
+        "claim_id"
+      ],
+      "tableTo": "hallado_claims",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_encounters_claim_id_hallado_claims_id_fk",
+      "entityType": "fks",
+      "table": "hallado_encounters"
+    },
+    {
+      "columns": [
+        "propuesto_por"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_encounters_propuesto_por_users_id_fk",
+      "entityType": "fks",
+      "table": "hallado_encounters"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_favorites_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "favorites"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_favorites_publication_id_publications_id_fk",
+      "entityType": "fks",
+      "table": "favorites"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "hallado_publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_follows_publication_id_hallado_publications_id_fk",
+      "entityType": "fks",
+      "table": "hallado_follows"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_follows_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "hallado_follows"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_publications_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "hallado_publications"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "hallado_publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_reviews_publication_id_hallado_publications_id_fk",
+      "entityType": "fks",
+      "table": "hallado_reviews"
+    },
+    {
+      "columns": [
+        "reviewer_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_reviews_reviewer_id_users_id_fk",
+      "entityType": "fks",
+      "table": "hallado_reviews"
+    },
+    {
+      "columns": [
+        "reviewed_user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_reviews_reviewed_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "hallado_reviews"
+    },
+    {
+      "columns": [
+        "claim_id"
+      ],
+      "tableTo": "hallado_claims",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_messages_claim_id_hallado_claims_id_fk",
+      "entityType": "fks",
+      "table": "hallado_messages"
+    },
+    {
+      "columns": [
+        "sender_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_messages_sender_id_users_id_fk",
+      "entityType": "fks",
+      "table": "hallado_messages"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_notifications_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "hallado_notifications"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "hallado_publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_notifications_publication_id_hallado_publications_id_fk",
+      "entityType": "fks",
+      "table": "hallado_notifications"
+    },
+    {
+      "columns": [
+        "claim_id"
+      ],
+      "tableTo": "hallado_claims",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_notifications_claim_id_hallado_claims_id_fk",
+      "entityType": "fks",
+      "table": "hallado_notifications"
+    },
+    {
+      "columns": [
+        "alert_id"
+      ],
+      "tableTo": "hallado_alerts",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_hallado_notifications_alert_id_hallado_alerts_id_fk",
+      "entityType": "fks",
+      "table": "hallado_notifications"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_offers_publication_id_publications_id_fk",
+      "entityType": "fks",
+      "table": "offers"
+    },
+    {
+      "columns": [
+        "buyer_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_offers_buyer_id_users_id_fk",
+      "entityType": "fks",
+      "table": "offers"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_operations_publication_id_publications_id_fk",
+      "entityType": "fks",
+      "table": "operations"
+    },
+    {
+      "columns": [
+        "offer_id"
+      ],
+      "tableTo": "offers",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_operations_offer_id_offers_id_fk",
+      "entityType": "fks",
+      "table": "operations"
+    },
+    {
+      "columns": [
+        "buyer_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_operations_buyer_id_users_id_fk",
+      "entityType": "fks",
+      "table": "operations"
+    },
+    {
+      "columns": [
+        "seller_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_operations_seller_id_users_id_fk",
+      "entityType": "fks",
+      "table": "operations"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_publication_images_publication_id_publications_id_fk",
+      "entityType": "fks",
+      "table": "publication_images"
+    },
+    {
+      "columns": [
+        "seller_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_publications_seller_id_users_id_fk",
+      "entityType": "fks",
+      "table": "publications"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_questions_publication_id_publications_id_fk",
+      "entityType": "fks",
+      "table": "questions"
+    },
+    {
+      "columns": [
+        "asker_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_questions_asker_id_users_id_fk",
+      "entityType": "fks",
+      "table": "questions"
+    },
+    {
+      "columns": [
+        "operation_id"
+      ],
+      "tableTo": "operations",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_reviews_operation_id_operations_id_fk",
+      "entityType": "fks",
+      "table": "reviews"
+    },
+    {
+      "columns": [
+        "reviewer_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_reviews_reviewer_id_users_id_fk",
+      "entityType": "fks",
+      "table": "reviews"
+    },
+    {
+      "columns": [
+        "reviewed_user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_reviews_reviewed_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "reviews"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_saved_searches_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "saved_searches"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_search_history_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "hallado_search_history"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_sessions_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "sessions"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "tableTo": "hallado_publications",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_thanks_publication_id_hallado_publications_id_fk",
+      "entityType": "fks",
+      "table": "hallado_thanks"
+    },
+    {
+      "columns": [
+        "author_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_thanks_author_id_users_id_fk",
+      "entityType": "fks",
+      "table": "hallado_thanks"
+    },
+    {
+      "columns": [
+        "recipient_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_thanks_recipient_id_users_id_fk",
+      "entityType": "fks",
+      "table": "hallado_thanks"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_hallado_uploads_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "hallado_uploads"
+    },
+    {
+      "columns": [
+        "user_id",
+        "publication_id"
+      ],
+      "nameExplicit": false,
+      "name": "favorites_pk",
+      "entityType": "pks",
+      "table": "favorites"
+    },
+    {
+      "columns": [
+        "publication_id",
+        "user_id"
+      ],
+      "nameExplicit": false,
+      "name": "hallado_follows_pk",
+      "entityType": "pks",
+      "table": "hallado_follows"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "hallado_alerts_pk",
+      "table": "hallado_alerts",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "hallado_claims_pk",
+      "table": "hallado_claims",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "hallado_encounters_pk",
+      "table": "hallado_encounters",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "hallado_publications_pk",
+      "table": "hallado_publications",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "hallado_reviews_pk",
+      "table": "hallado_reviews",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "login"
+      ],
+      "nameExplicit": false,
+      "name": "hallado_login_attempts_pk",
+      "table": "hallado_login_attempts",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "hallado_messages_pk",
+      "table": "hallado_messages",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "hallado_notifications_pk",
+      "table": "hallado_notifications",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "offers_pk",
+      "table": "offers",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "operations_pk",
+      "table": "operations",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "otp_codes_pk",
+      "table": "otp_codes",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "publication_images_pk",
+      "table": "publication_images",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "publications_pk",
+      "table": "publications",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "questions_pk",
+      "table": "questions",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "reviews_pk",
+      "table": "reviews",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "saved_searches_pk",
+      "table": "saved_searches",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "hallado_search_history_pk",
+      "table": "hallado_search_history",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "sessions_pk",
+      "table": "sessions",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "hallado_thanks_pk",
+      "table": "hallado_thanks",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "filename"
+      ],
+      "nameExplicit": false,
+      "name": "hallado_uploads_pk",
+      "table": "hallado_uploads",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "users_pk",
+      "table": "users",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        },
+        {
+          "value": "clave",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_alerta_unique",
+      "entityType": "indexes",
+      "table": "hallado_alerts"
+    },
+    {
+      "columns": [
+        {
+          "value": "json_extract(\"filtros\", '$.categoria')",
+          "isExpression": true
+        },
+        {
+          "value": "json_extract(\"filtros\", '$.situacion')",
+          "isExpression": true
+        },
+        {
+          "value": "activa",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_alerta_candidatas_idx",
+      "entityType": "indexes",
+      "table": "hallado_alerts"
+    },
+    {
+      "columns": [
+        {
+          "value": "publication_id",
+          "isExpression": false
+        },
+        {
+          "value": "user_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_reclamo_usuario_unique",
+      "entityType": "indexes",
+      "table": "hallado_claims"
+    },
+    {
+      "columns": [
+        {
+          "value": "publication_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"hallado_claims\".\"estado\" = 'aceptado'",
+      "origin": "manual",
+      "name": "hallado_aceptado_unique",
+      "entityType": "indexes",
+      "table": "hallado_claims"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": "\"hallado_claims\".\"estado\" = 'aceptado'",
+      "origin": "manual",
+      "name": "hallado_aceptado_usuario_idx",
+      "entityType": "indexes",
+      "table": "hallado_claims"
+    },
+    {
+      "columns": [
+        {
+          "value": "claim_id",
+          "isExpression": false
+        },
+        {
+          "value": "intento",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_encuentro_intento_unique",
+      "entityType": "indexes",
+      "table": "hallado_encounters"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_seguimiento_usuario_idx",
+      "entityType": "indexes",
+      "table": "hallado_follows"
+    },
+    {
+      "columns": [
+        {
+          "value": "tipo",
+          "isExpression": false
+        },
+        {
+          "value": "categoria",
+          "isExpression": false
+        },
+        {
+          "value": "fecha",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_busqueda_idx",
+      "entityType": "indexes",
+      "table": "hallado_publications"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_propias_idx",
+      "entityType": "indexes",
+      "table": "hallado_publications"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        },
+        {
+          "value": "client_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_client_id_unique",
+      "entityType": "indexes",
+      "table": "hallado_publications"
+    },
+    {
+      "columns": [
+        {
+          "value": "publication_id",
+          "isExpression": false
+        },
+        {
+          "value": "reviewer_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_valoracion_unique",
+      "entityType": "indexes",
+      "table": "hallado_reviews"
+    },
+    {
+      "columns": [
+        {
+          "value": "reviewed_user_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_valorado_idx",
+      "entityType": "indexes",
+      "table": "hallado_reviews"
+    },
+    {
+      "columns": [
+        {
+          "value": "claim_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_mensaje_reclamo_idx",
+      "entityType": "indexes",
+      "table": "hallado_messages"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_notificacion_usuario_idx",
+      "entityType": "indexes",
+      "table": "hallado_notifications"
+    },
+    {
+      "columns": [
+        {
+          "value": "alert_id",
+          "isExpression": false
+        },
+        {
+          "value": "read_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_notificacion_alerta_idx",
+      "entityType": "indexes",
+      "table": "hallado_notifications"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": "\"hallado_notifications\".\"read_at\" IS NULL",
+      "origin": "manual",
+      "name": "hallado_notificacion_sinleer_idx",
+      "entityType": "indexes",
+      "table": "hallado_notifications"
+    },
+    {
+      "columns": [
+        {
+          "value": "email",
+          "isExpression": false
+        },
+        {
+          "value": "purpose",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "idx_otp_email_purpose",
+      "entityType": "indexes",
+      "table": "otp_codes"
+    },
+    {
+      "columns": [
+        {
+          "value": "publication_id",
+          "isExpression": false
+        },
+        {
+          "value": "position",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "publication_image_position_unique",
+      "entityType": "indexes",
+      "table": "publication_images"
+    },
+    {
+      "columns": [
+        {
+          "value": "status",
+          "isExpression": false
+        },
+        {
+          "value": "published_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "idx_publications_feed",
+      "entityType": "indexes",
+      "table": "publications"
+    },
+    {
+      "columns": [
+        {
+          "value": "seller_id",
+          "isExpression": false
+        },
+        {
+          "value": "status",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "idx_publications_seller",
+      "entityType": "indexes",
+      "table": "publications"
+    },
+    {
+      "columns": [
+        {
+          "value": "operation_id",
+          "isExpression": false
+        },
+        {
+          "value": "reviewer_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "review_operation_reviewer_unique",
+      "entityType": "indexes",
+      "table": "reviews"
+    },
+    {
+      "columns": [
+        {
+          "value": "reviewed_user_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "idx_reviews_reviewed_user",
+      "entityType": "indexes",
+      "table": "reviews"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        },
+        {
+          "value": "clave",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_historial_unique",
+      "entityType": "indexes",
+      "table": "hallado_search_history"
+    },
+    {
+      "columns": [
+        {
+          "value": "token_hash",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "idx_sessions_token",
+      "entityType": "indexes",
+      "table": "sessions"
+    },
+    {
+      "columns": [
+        {
+          "value": "publication_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_agradecimiento_unique",
+      "entityType": "indexes",
+      "table": "hallado_thanks"
+    },
+    {
+      "columns": [
+        {
+          "value": "recipient_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_agradecimiento_usuario_idx",
+      "entityType": "indexes",
+      "table": "hallado_thanks"
+    },
+    {
+      "columns": [
+        {
+          "value": "recipient_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "hallado_agradecimiento_pagina_idx",
+      "entityType": "indexes",
+      "table": "hallado_thanks"
+    },
+    {
+      "columns": [
+        "dedupe_key"
+      ],
+      "nameExplicit": false,
+      "name": "hallado_notifications_dedupe_key_unique",
+      "entityType": "uniques",
+      "table": "hallado_notifications"
+    },
+    {
+      "columns": [
+        "publication_id"
+      ],
+      "nameExplicit": false,
+      "name": "operations_publication_id_unique",
+      "entityType": "uniques",
+      "table": "operations"
+    },
+    {
+      "columns": [
+        "offer_id"
+      ],
+      "nameExplicit": false,
+      "name": "operations_offer_id_unique",
+      "entityType": "uniques",
+      "table": "operations"
+    },
+    {
+      "columns": [
+        "email"
+      ],
+      "nameExplicit": false,
+      "name": "users_email_unique",
+      "entityType": "uniques",
+      "table": "users"
+    },
+    {
+      "columns": [
+        "username"
+      ],
+      "nameExplicit": false,
+      "name": "users_username_unique",
+      "entityType": "uniques",
+      "table": "users"
+    },
+    {
+      "value": "\"estado\" IN ('pendiente','aceptado','rechazado','cancelado','vencido')",
+      "name": "hallado_reclamo_estado_check",
+      "entityType": "checks",
+      "table": "hallado_claims"
+    },
+    {
+      "value": "\"estado\" IN ('pendiente','aceptado')",
+      "name": "hallado_encuentro_estado_check",
+      "entityType": "checks",
+      "table": "hallado_encounters"
+    },
+    {
+      "value": "\"tipo\" IN ('perdido','encontrado')",
+      "name": "hallado_tipo_check",
+      "entityType": "checks",
+      "table": "hallado_publications"
+    },
+    {
+      "value": "\"estado\" IN ('abierta','en_reclamo','resuelta')",
+      "name": "hallado_estado_check",
+      "entityType": "checks",
+      "table": "hallado_publications"
+    },
+    {
+      "value": "\"franja\" IN ('manana','tarde','noche')",
+      "name": "hallado_franja_check",
+      "entityType": "checks",
+      "table": "hallado_publications"
+    },
+    {
+      "value": "\"status\" IN ('pending', 'countered', 'accepted', 'rejected', 'expired', 'cancelled')",
+      "name": "offer_status_check",
+      "entityType": "checks",
+      "table": "offers"
+    },
+    {
+      "value": "\"purpose\" IN ('registration', 'login', 'set_password')",
+      "name": "otp_purpose_check",
+      "entityType": "checks",
+      "table": "otp_codes"
+    },
+    {
+      "value": "\"item_condition\" IN ('new', 'like_new', 'used')",
+      "name": "publication_condition_check",
+      "entityType": "checks",
+      "table": "publications"
+    },
+    {
+      "value": "\"status\" IN ('active', 'paused', 'sold')",
+      "name": "publication_status_check",
+      "entityType": "checks",
+      "table": "publications"
+    },
+    {
+      "value": "\"rating\" BETWEEN 1 AND 5",
+      "name": "review_rating_check",
+      "entityType": "checks",
+      "table": "reviews"
+    }
+  ],
+  "renames": []
+}
