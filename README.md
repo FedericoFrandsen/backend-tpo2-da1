@@ -83,7 +83,7 @@ Si una cuenta demo ya existía, se conserva su contraseña anterior. Las fotos d
 - Resultados paginados y ordenados por fecha o cercanía; hasta cinco búsquedas recientes por usuario.
 - Publicaciones perdidas/encontradas: creación, edición, eliminación lógica, fotos y gestión de estados. Barrio del catálogo (91 entradas: CABA y GBA), dirección exacta y hora `HH:MM` obligatorios; la franja se deriva de la hora.
 - Pregunta/respuesta de verificación del publicador (respuesta privada), reclamos con respuesta, foto de prueba privada y barrio, vencimiento a 30 días con renovación y alta idempotente por `clientId`.
-- Reclamos: crear, aceptar, rechazar, cancelar y resolver una devolución; un único aceptado por publicación.
+- Reclamos: crear (el mensaje es opcional, salvo en un hallazgo viejo sin pregunta de verificación), aceptar, rechazar, cancelar y resolver una devolución; un único aceptado por publicación.
 - Dirección exacta reservada al autor y al reclamante aceptado. Coordenadas públicas redondeadas a tres decimales; distancia redondeada a 0.1 km.
 - Teléfono visible a la contraparte únicamente con reclamo aceptado y consentimiento vigente.
 - Mensajes privados entre las partes de un reclamo aceptado, que pueden seguir consultándose tras resolverlo.

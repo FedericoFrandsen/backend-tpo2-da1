@@ -149,7 +149,7 @@ export const publicationBody = t.Object({
 });
 export type PublicationBody = typeof publicationBody.static;
 export const claimBody = t.Object({
-  mensaje: t.String({ minLength: 5, maxLength: 1000 }),
+  mensaje: t.Optional(t.String({ maxLength: 1000 })),
   respuestaVerificacion: t.Optional(t.Union([t.String({ maxLength: 200 }), t.Null()])),
   fotoPrueba: t.Optional(t.Union([t.String({ maxLength: 250 }), t.Null()])),
   barrio: t.Optional(t.Union([t.String({ maxLength: 100 }), t.Null()])),

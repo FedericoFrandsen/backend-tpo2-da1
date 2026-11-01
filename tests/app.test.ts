@@ -3237,3 +3237,52 @@ describe("indicador de reclamos entrantes y avisos de encuentro", () => {
     expect(r.data.resumen.reclamos).toEqual([{ reclamoId: c.id, sinLeer: 1, mensajes: 1 }]);
   });
 });
+
+describe("mensaje del reclamo opcional", () => {
+  const reclamar = (id: string, body: Record<string, unknown>, account = 1) =>
+    api(`/publicaciones/${id}/reclamos`, "POST", body, accounts[account]!.token);
+
+  test("«Es mío» no necesita mensaje: sin él, vacío o con espacios se guarda cadena vacía; con él, recortado", async () => {
+    const respuestaVerificacion = "Una estrella azul";
+    const a = await publish({ titulo: "Llaves A" }); const b = await publish({ titulo: "Llaves B" }); const c = await publish({ titulo: "Llaves C" });
+    const sin = await reclamar(a.id, { respuestaVerificacion });
+    expect(sin.response.status).toBe(201); expect(sin.data.mensaje).toBe("");
+    const blancos = await reclamar(b.id, { mensaje: "   ", respuestaVerificacion });
+    expect(blancos.response.status).toBe(201); expect(blancos.data.mensaje).toBe("");
+    // Ya no hay mínimo: un mensaje corto vale.
+    const corto = await reclamar(c.id, { mensaje: "  Hola ", respuestaVerificacion });
+    expect(corto.response.status).toBe(201); expect(corto.data.mensaje).toBe("Hola");
+    expect(db.select().from(claims).where(eq(claims.id, sin.data.id)).get()!.mensaje).toBe("");
+    // El reclamo sin mensaje se lista y se acepta como cualquier otro.
+    const recibidos = (await api("/me/reclamos?tipo=recibidos", "GET", undefined, accounts[0]!.token)).data.items;
+    expect(recibidos.find((x: any) => x.id === sin.data.id).mensaje).toBe("");
+    expect((await api(`/reclamos/${sin.data.id}/aceptar`, "POST", undefined, accounts[0]!.token)).response.status).toBe(200);
+  });
+
+  test("el máximo sigue siendo 1000 caracteres y la respuesta de verificación sigue siendo obligatoria", async () => {
+    const p = await publish();
+    const largo = await reclamar(p.id, { mensaje: "x".repeat(1001), respuestaVerificacion: "Una estrella azul" });
+    expect(largo.response.status).toBe(422);
+    expect((await reclamar(p.id, { mensaje: "Son mis llaves" })).data.error.code).toBe("VERIFICATION_ANSWER_REQUIRED");
+    expect((await reclamar(p.id, { mensaje: "x".repeat(1000), respuestaVerificacion: "Una estrella azul" })).response.status).toBe(201);
+  });
+
+  test("«Lo encontré» tampoco necesita mensaje, pero sí la foto y el barrio", async () => {
+    const perdida = await publish({ tipo: "perdi", titulo: "Llaves perdidas", preguntaVerificacion: undefined, respuestaVerificacion: undefined });
+    const proof = await uploadProof(1);
+    expect((await reclamar(perdida.id, { barrio: "Palermo" })).data.error.code).toBe("PROOF_PHOTO_REQUIRED");
+    const ok = await reclamar(perdida.id, { fotoPrueba: proof.url, barrio: "Palermo" });
+    expect(ok.response.status).toBe(201); expect(ok.data.mensaje).toBe("");
+  });
+
+  test("un hallazgo viejo sin pregunta de verificación sigue exigiendo un mensaje de al menos 5 caracteres", async () => {
+    const viejo = await publish({ titulo: "Llaves viejas" });
+    db.update(posts).set({ preguntaVerificacion: null, respuestaVerificacion: null }).where(eq(posts.id, viejo.id)).run();
+    for (const body of [{}, { mensaje: "" }, { mensaje: "    " }, { mensaje: "Mías" }, { mensaje: " abcd " }]) {
+      const r = await reclamar(viejo.id, body);
+      expect([JSON.stringify(body), r.response.status, r.data.error.code]).toEqual([JSON.stringify(body), 422, "MESSAGE_REQUIRED"]);
+    }
+    const ok = await reclamar(viejo.id, { mensaje: "Son mías" });
+    expect(ok.response.status).toBe(201); expect(ok.data.mensaje).toBe("Son mías");
+  });
+});

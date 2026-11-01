@@ -20,7 +20,7 @@ export function interactionRoutes(db: AppDatabase) {
   return new Elysia()
     .post("/publicaciones/:id/reclamos", async ({ headers, params, body, set }) => {
       const user = await requireUser(db, headers);
-      const mensaje = cleanText(body.mensaje, 5, "mensaje");
+      const mensaje = (body.mensaje ?? "").trim();
       const id = db.transaction((tx) => {
         expirePendingClaims(tx);
         const p = getPost(tx, params.id);
@@ -36,6 +36,10 @@ export function interactionRoutes(db: AppDatabase) {
           throw new ApiError(409, "MAX_ATTEMPTS_EXCEEDED", "Alcanzaste el límite de 3 intentos de reclamo para esta publicación");
         }
         // «Es mío» (sobre un hallazgo) responde la pregunta del publicador; «Lo encontré» (sobre algo perdido) exige foto y barrio.
+        // El mensaje es opcional salvo en un hallazgo viejo sin pregunta de verificación, donde es la única prueba.
+        if (p.tipo === "encontrado" && !p.preguntaVerificacion && mensaje.length < 5) {
+          throw new ApiError(422, "MESSAGE_REQUIRED", "Describí el objeto para que el publicador pueda comprobar que es tuyo (al menos 5 caracteres)");
+        }
         const respuesta = (body.respuestaVerificacion ?? "").trim();
         const barrioIngresado = (body.barrio ?? "").trim();
         if (p.tipo === "encontrado" && p.preguntaVerificacion && !respuesta) {

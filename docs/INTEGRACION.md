@@ -199,7 +199,7 @@ El detalle agrega `preguntaVerificacion` (y `respuestaVerificacion` solo para el
 
 | Acción | Petición |
 | --- | --- |
-| Es mío / Lo encontré | POST `/publicaciones/:id/reclamos` con `{ mensaje, respuestaVerificacion?, fotoPrueba?, barrio? }` (ver reglas abajo) |
+| Es mío / Lo encontré | POST `/publicaciones/:id/reclamos` con `{ mensaje?, respuestaVerificacion?, fotoPrueba?, barrio? }` (ver reglas abajo) |
 | Ver reclamos de una publicación propia | GET `/publicaciones/:id/reclamos` |
 | Ver mis reclamos enviados | GET `/me/reclamos` |
 | Consultar un reclamo como participante | GET `/reclamos/:id` |
@@ -211,7 +211,7 @@ El detalle agrega `preguntaVerificacion` (y `respuestaVerificacion` solo para el
 
 Un reclamo incluye `id, publicacionId, usuarioId, usuario, perfil, mensaje, respuestaVerificacion, fotoPrueba, barrio, estado, intentos, maxIntentos, permiteTelefono, telefono, creadaEn, actualizadaEn`. `telefono` solo se completa si ese reclamo está aceptado, hay consentimiento y quien lo consulta participa. Los otros reclamantes no pueden consultar el listado del dueño.
 
-Reglas del reclamo estructurado (`mensaje` sigue siendo obligatorio, 5 a 1000 caracteres; las validaciones nuevas se aplican después de las de duplicado/intentos):
+Reglas del reclamo estructurado (`mensaje` es opcional, hasta 1000 caracteres, sin mínimo; si no viene se guarda `""`. Excepción: en un hallazgo viejo sin pregunta de verificación sigue siendo la única prueba y se exigen al menos 5 caracteres, si no 422 `MESSAGE_REQUIRED`. Las validaciones se aplican después de las de duplicado/intentos):
 
 | Reclamo | Sobre | Obligatorio | Error 422 |
 | --- | --- | --- | --- |
