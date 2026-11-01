@@ -25,7 +25,7 @@ Basado en `TPO_Hallado.pdf`: punto 1 (página 1), punto 4 (página 2) y punto 5 
    ```
 
    Los IDs anteriores corresponden a estos dos emuladores; si cambiaron, consultar `adb devices`. Dejar el mismo servidor Expo en el puerto 8082. No hace falta recompilar la app por cambiar el seed.
-5. Preparar en la galería de los dispositivos las imágenes `assets/demo/llaves-1.png`, `llaves-2.png` y `mochila-1.png`, o fotos propias. Confirmar antes que cámara y selector de galería funcionan. Las siete imágenes incluidas son ilustraciones, se sirven desde el backend y no dependen de internet externo.
+5. Las publicaciones del seed ya traen imágenes: no hay que cargarlas manualmente. Para las dos altas que se crean en vivo durante el video, preparar en la galería de los dispositivos `assets/demo/llaves-1.png`, `llaves-2.png` y `mochila-1.png`, o fotos propias. Confirmar antes que cámara y selector de galería funcionan. Las nueve imágenes incluidas son ilustraciones, se sirven desde el backend y no dependen de internet externo.
 6. Preparar una huella y bloqueo de pantalla en los ajustes Android del primer emulador, o usar un teléfono con biometría. Probar la simulación de huella desde los controles del emulador. El seed no configura sensores ni enrola huellas.
 7. Tener una casilla sin cuenta para mostrar registro. Si se usa correo real, debe ser una casilla propia que se pueda abrir durante la grabación. En modo consola se puede usar `grabacion@example.com` en una toma nueva.
 8. Revisar que no haya un borrador de un ensayo anterior en la cuenta Sofía; descartarlo desde la app antes de empezar. Una toma nueva renueva el backend, pero no borra borradores, fotos ni ajustes biométricos del dispositivo. Cerrar las sesiones anteriores para ingresar a la nueva base.

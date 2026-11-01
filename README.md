@@ -72,6 +72,8 @@ El seed está orientado a los puntos 1, 4 y 5: crea 11 publicaciones ficticias e
 
 Las fotos se copian de `assets/demo` a los uploads configurados y se sirven por las rutas normales de la API, con propietario registrado. No requieren una web externa. La respuesta privada de las llaves es `Nube` y no se ve en las imágenes. El [guion](docs/DEMO-145.md) detalla usuarios, casos, datos para completar y narración.
 
+Repetir `bun run db:seed` también completa los placeholders de las publicaciones sin fotos del seed anterior, según su categoría, y de los ejemplos actuales que quedaron sin imágenes. Conserva las fotos ya elegidas y las publicaciones personales; no hace falta cargar manualmente una imagen por cada ejemplo.
+
 Si una cuenta demo ya existía, se conserva su contraseña y perfil anterior. Repetir `db:seed` conserva las fechas y los cambios de las publicaciones existentes; tampoco elimina los ejemplos masivos del seed anterior. Para una demo limpia usar `demo:reset`: crea una base nueva bajo `data/demo-145/` y conserva las tomas anteriores. Reiniciar con `demo` reutiliza la toma actual sin revertir lo grabado. La demo respeta la configuración de correo: el modo consola permite ensayar OTP, pero no demuestra entrega real de email. Los borradores y la biometría se preparan en el dispositivo, no en el seed.
 
 ## Funcionalidades

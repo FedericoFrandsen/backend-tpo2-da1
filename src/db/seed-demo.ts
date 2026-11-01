@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { mkdir, copyFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
@@ -20,11 +20,11 @@ export const DEMO_POSTS = {
   abierta: "demo145-billetera-abierta", enReclamo: "demo145-auriculares-en-reclamo",
   vencida: "demo145-campera-vencida", resuelta: "demo145-llaves-devueltas",
 } as const;
-const PHOTO_NAMES = ["llaves-1", "llaves-2", "mochila-1", "mochila-2", "billetera", "auriculares", "campera"] as const;
+const PHOTO_NAMES = ["llaves-1", "llaves-2", "mochila-1", "mochila-2", "billetera", "auriculares", "campera", "documentos", "mascota"] as const;
 type Photo = typeof PHOTO_NAMES[number];
 type Post = typeof posts.$inferInsert;
 
-/** Repetir el seed conserva contraseñas, fechas y cambios existentes. Una nueva toma usa otra base. */
+/** Conserva contraseñas, fechas y cambios; completa imágenes vacías de los ejemplos. */
 export async function seedDemo(db: AppDatabase, options: { uploadsPath: string; now?: Date }) {
   if (config.isProduction) throw new Error("El seed de demostración solo se ejecuta fuera de producción.");
   const now = options.now ?? new Date(), iso = now.toISOString();
@@ -81,6 +81,21 @@ export async function seedDemo(db: AppDatabase, options: { uploadsPath: string; 
       "Devolución concretada de demostración para la reputación de Lucía.", categoria, [photo], 12 + i),
       estado: "resuelta", resolvedAt: ago(8 + i).toISOString() });
   }
+  // Completar solo imágenes vacías de ejemplos conocidos, incluidos los del seed anterior.
+  const byCategory: Record<Post["categoria"], Photo[]> = {
+    Documentos: ["documentos"], Llaves: ["llaves-1", "llaves-2"], "Electrónica": ["auriculares"],
+    Mascotas: ["mascota"], Ropa: ["campera"], Otros: ["mochila-1", "mochila-2"],
+  };
+  const missingPhotos: { id: string; fotos: string[] }[] = [];
+  for (const previous of db.select().from(posts).all()) {
+    if (previous.fotos.length || previous.deletedAt) continue;
+    const owner = people.findIndex((p) => p.id === previous.userId);
+    if (owner < 0) continue;
+    const currentExample = data.find((p) => p.id === previous.id);
+    const legacyExample = /^demo-(?:[0-5]-[0-5]-(?:encontrado|perdido)-[0-2]|devolucion-[0-4])$/.test(previous.id);
+    if (!currentExample && !legacyExample) continue;
+    missingPhotos.push({ id: previous.id, fotos: currentExample?.fotos ?? photos(owner, byCategory[previous.categoria]) });
+  }
   await mkdir(options.uploadsPath, { recursive: true });
   for (const image of images.values()) {
     const target = join(options.uploadsPath, image.filename);
@@ -97,6 +112,8 @@ export async function seedDemo(db: AppDatabase, options: { uploadsPath: string; 
       userId: people[image.owner]!.id, contentType: "image/png", tipo: "imagen", createdAt: iso,
     }).onConflictDoNothing().run();
     for (const publication of data) tx.insert(posts).values(publication).onConflictDoNothing().run();
+    for (const publication of missingPhotos) tx.update(posts).set({ fotos: publication.fotos })
+      .where(and(eq(posts.id, publication.id), eq(posts.fotos, []))).run();
     tx.insert(claims).values({ id: "demo145-reclamo-auriculares", publicationId: DEMO_POSTS.enReclamo,
       userId: people[2]!.id, mensaje: "Son mis auriculares. Mi nombre está debajo de la vincha.",
       respuestaVerificacion: "Martín", estado: "aceptado", createdAt: ago(1).toISOString(), updatedAt: iso,

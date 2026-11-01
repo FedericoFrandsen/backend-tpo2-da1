@@ -109,6 +109,29 @@ describe("seed de la demo de puntos 1, 4 y 5", () => {
     expect(edit.data.titulo).toBe("Billetera marrón con cierre");
   });
 
+  test("completa placeholders de ejemplos viejos y nuevos sin tocar fotos elegidas ni publicaciones personales", async () => {
+    const original = db.select().from(posts).where(eq(posts.id, DEMO_POSTS.abierta)).get()!;
+    for (const [id, categoria] of [["demo-0-0-encontrado-0", "Documentos"], ["demo-3-0-encontrado-0", "Mascotas"]] as const) {
+      db.insert(posts).values({ ...original, id, categoria, fotos: [] }).run();
+    }
+    db.insert(posts).values({ ...original, id: "alta-personal-sin-foto", fotos: [] }).run();
+    db.update(posts).set({ fotos: [], titulo: "Título editado que se conserva" }).where(eq(posts.id, original.id)).run();
+    const kept = db.select().from(posts).where(eq(posts.id, DEMO_POSTS.encontrado)).get()!;
+    await seedDemo(db, { uploadsPath: directory });
+    for (const id of [original.id, "demo-0-0-encontrado-0", "demo-3-0-encontrado-0"]) {
+      const row = db.select().from(posts).where(eq(posts.id, id)).get()!;
+      expect(row.fotos.length).toBeGreaterThan(0);
+      for (const photo of row.fotos) {
+        const image = db.select().from(uploads).where(eq(uploads.filename, photo.slice(9))).get()!;
+        expect(image.userId).toBe(row.userId);
+        expect((await app.handle(new Request(`http://localhost${photo}`))).status).toBe(200);
+      }
+    }
+    expect(db.select().from(posts).where(eq(posts.id, original.id)).get()!.titulo).toBe("Título editado que se conserva");
+    expect(db.select().from(posts).where(eq(posts.id, kept.id)).get()!.fotos).toEqual(kept.fotos);
+    expect(db.select().from(posts).where(eq(posts.id, "alta-personal-sin-foto")).get()!.fotos).toEqual([]);
+  });
+
   test("repetir el seed conserva la contraseña cambiada, la renovación y los datos ajenos", async () => {
     const newHash = await Bun.password.hash("OtraClave123");
     db.update(users).set({ passwordHash: newHash, email: "demo@hallado.com" })
