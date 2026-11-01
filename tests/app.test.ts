@@ -2426,3 +2426,269 @@ describe("Catálogo de categorías y barrios", () => {
     expect((await api("/me/busquedas", "GET", undefined, accounts[1]!.token)).data.items[0].filtros.categoria).toBe("Electrónica");
   });
 });
+
+// Plan 008: recorridos completos, como los hace la app, con dos cuentas y sin tocar la base de datos del servidor.
+// Los casos sueltos ya están cubiertos arriba; estos encadenan cada paso con el anterior para detectar
+// que un paso deje al siguiente en un estado que ninguna prueba aislada ve.
+describe("recorridos de punta a punta (plan 008)", () => {
+  const OWNER = 0, OTHER = 1, STRANGER = 2;
+  const as = (who: number) => accounts[who]!.token;
+  const get = (path: string, who?: number) => api(path, "GET", undefined, who === undefined ? undefined : as(who));
+  const send = (path: string, who: number, body?: unknown, method = "POST") => api(path, method, body, as(who));
+  const DAY = 86_400_000;
+
+  async function image(who: number) {
+    const form = new FormData(); form.set("file", new File([PNG], "foto.png", { type: "image/png" }));
+    const result = await api("/uploads/images", "POST", form, as(who));
+    expect(result.response.status).toBe(201);
+    return result.data.url as string;
+  }
+  /** Propone o contrapropone un lugar de encuentro con el intento vigente, como hace la pantalla. */
+  async function propose(claimId: string, who: number, direccion: string) {
+    const actual = (await get(`/reclamos/${claimId}/encuentro`, who)).data;
+    return send(`/reclamos/${claimId}/encuentro`, who, { direccion, propuestaId: actual.encuentro?.id ?? null, intento: actual.intento });
+  }
+
+  test("hallazgo con fotos y pregunta → evidencia → aceptar → teléfono según consentimiento → encuentro → resolver → valorar y agradecer", async () => {
+    // 1. Quien encontró publica con dos fotos propias y una pregunta que solo responde el dueño.
+    const fotos = [await image(OWNER), await image(OWNER)];
+    const p = await publish({ fotos });
+    expect(p.fotos).toEqual(fotos); expect(p.estado).toBe("abierta");
+    const publico = (await get(`/publicaciones/${p.id}`)).data;
+    expect(publico.fotos).toEqual(fotos);
+    expect(publico.preguntaVerificacion).toBe("¿Qué dibujo tiene el llavero?");
+    expect(publico).not.toHaveProperty("respuestaVerificacion");
+    expect(publico.direccionExacta).toBeNull(); expect(publico.publicador.phone).toBeUndefined();
+
+    // 2. Evidencia: sin responder la pregunta no hay reclamo; con la respuesta queda pendiente y todo sigue privado.
+    const sinRespuesta = await send(`/publicaciones/${p.id}/reclamos`, OTHER, { mensaje: "Son mis llaves, tienen una marca." });
+    expect([sinRespuesta.response.status, sinRespuesta.data.error.code]).toEqual([422, "VERIFICATION_ANSWER_REQUIRED"]);
+    const c = await claim(p.id, OTHER);
+    expect(c.estado).toBe("pendiente");
+    const pendiente = (await get(`/publicaciones/${p.id}`, OTHER)).data;
+    expect(pendiente.direccionExacta).toBeNull(); expect(pendiente.publicador.phone).toBeUndefined();
+    expect((await get(`/publicaciones/${p.id}/reclamos`, OWNER)).data.items[0].telefono).toBeNull();
+    expect((await get(`/reclamos/${c.id}/encuentro`, OWNER)).response.status).toBe(409);
+
+    // 3. Aceptar abre dirección y teléfono solo a las partes, porque ambos dieron su consentimiento.
+    expect((await send(`/reclamos/${c.id}/aceptar`, OWNER)).response.status).toBe(200);
+    const aceptado = (await get(`/publicaciones/${p.id}`, OTHER)).data;
+    expect(aceptado.estado).toBe("en_reclamo");
+    expect(aceptado.direccionExacta).toBe("Calle privada 123"); expect(aceptado.publicador.phone).toBe("1155550000");
+    expect((await get(`/publicaciones/${p.id}/reclamos`, OWNER)).data.items[0].telefono).toBe("1155550001");
+    const ajeno = (await get(`/publicaciones/${p.id}`, STRANGER)).data;
+    expect(ajeno.direccionExacta).toBeNull(); expect(ajeno.publicador.phone).toBeUndefined();
+
+    // 4. El teléfono sigue el consentimiento de cada parte, en ambos sentidos, y vuelve al reactivarlo.
+    await send("/me", OWNER, { sharePhone: false }, "PATCH");
+    expect((await get(`/publicaciones/${p.id}`, OTHER)).data.publicador.phone).toBeUndefined();
+    expect((await get(`/publicaciones/${p.id}/reclamos`, OWNER)).data.items[0].telefono).toBe("1155550001");
+    await send("/me", OTHER, { sharePhone: false }, "PATCH");
+    const sinTelefonos = (await get(`/publicaciones/${p.id}/reclamos`, OWNER)).data.items[0];
+    expect(sinTelefonos.telefono).toBeNull(); expect(sinTelefonos.permiteTelefono).toBe(false);
+    await send("/me", OWNER, { sharePhone: true }, "PATCH");
+    await send("/me", OTHER, { sharePhone: true }, "PATCH");
+    expect((await get(`/publicaciones/${p.id}`, OTHER)).data.publicador.phone).toBe("1155550000");
+    expect((await get(`/publicaciones/${p.id}/reclamos`, OWNER)).data.items[0].telefono).toBe("1155550001");
+
+    // 5. Punto de encuentro: propone quien tiene el objeto, la otra parte contrapropone y se acepta la alternativa.
+    expect((await propose(c.id, OTHER, "Av. Santa Fe 1234, CABA")).response.status).toBe(409);
+    expect((await propose(c.id, OWNER, "Av. Santa Fe 1234, CABA")).response.status).toBe(200);
+    const alternativa = await propose(c.id, OTHER, "Lima 775, CABA");
+    expect(alternativa.response.status).toBe(200);
+    expect((await send(`/reclamos/${c.id}/encuentro/aceptar`, STRANGER, { propuestaId: alternativa.data.encuentro.id, intento: 1 })).response.status).toBe(403);
+    const acordado = await send(`/reclamos/${c.id}/encuentro/aceptar`, OWNER, { propuestaId: alternativa.data.encuentro.id, intento: 1 });
+    expect(acordado.response.status).toBe(200);
+    for (const who of [OWNER, OTHER]) {
+      const lectura = (await get(`/reclamos/${c.id}/encuentro`, who)).data.encuentro;
+      expect([lectura.estado, lectura.direccion]).toEqual(["aceptado", "Lima 775, CABA"]);
+    }
+    expect((await get(`/reclamos/${c.id}/encuentro`, STRANGER)).response.status).toBe(403);
+
+    // 6. Resolver: solo el publicador; después se puede valorar y quien recupera agradece una sola vez.
+    expect((await send(`/publicaciones/${p.id}/resolver`, OTHER)).response.status).toBe(403);
+    expect((await send(`/publicaciones/${p.id}/resolver`, OWNER)).response.status).toBe(200);
+    expect((await get(`/publicaciones/${p.id}`)).data.estado).toBe("resuelta");
+    const valoraciones = `/publicaciones/${p.id}/valoraciones`;
+    expect((await send(valoraciones, STRANGER, { positiva: true })).response.status).toBe(403);
+    expect((await send(valoraciones, OTHER, { positiva: true, comentario: "Muy amable" })).response.status).toBe(201);
+    expect((await send(valoraciones, OWNER, { positiva: true })).response.status).toBe(201);
+    expect((await send(valoraciones, OTHER, { positiva: false })).data.error.code).toBe("ALREADY_REVIEWED");
+    const gracias = `/publicaciones/${p.id}/agradecimientos`;
+    expect((await send(gracias, OWNER, { mensaje: "Gracias a vos" })).response.status).toBe(403);
+    expect((await send(gracias, OTHER, { mensaje: "Gracias por devolverlas" })).response.status).toBe(201);
+    expect((await send(gracias, OTHER, { mensaje: "Otra vez" })).data.error.code).toBe("ALREADY_THANKED");
+
+    // 7. Resultado visible: reputación, agradecimiento e historial de cada parte, sin datos privados en el perfil público.
+    const perfil = await get(`/usuarios/${accounts[OWNER]!.id}`);
+    expect(perfil.data.reputation).toEqual({ completedReturns: 1, positiveReviews: 1, negativeReviews: 0 });
+    const textoPerfil = JSON.stringify(perfil.data);
+    for (const privado of ["1155550000", accounts[OWNER]!.email, "Calle privada", "Una estrella azul"]) expect(textoPerfil).not.toContain(privado);
+    expect((await get(`/usuarios/${accounts[OWNER]!.id}/agradecimientos`)).data.items[0].mensaje).toBe("Gracias por devolverlas");
+    expect((await get("/me/historial?tipo=devolvi", OWNER)).data.items.map((x: any) => x.id)).toEqual([p.id]);
+    const recupero = (await get("/me/historial?tipo=recupere", OTHER)).data.items[0];
+    expect(recupero.id).toBe(p.id); expect(recupero.puedeValorar).toBe(false); expect(recupero.agradecimiento.mensaje).toBe("Gracias por devolverlas");
+    expect((await get("/me/historial", STRANGER)).data.items).toEqual([]);
+  });
+
+  test("pérdida: foto y barrio obligatorios, negativas y tres intentos, sin afectar a otra persona", async () => {
+    const perdida = await publish({ tipo: "perdi", titulo: "Perdí mis llaves" }, OWNER);
+    expect(perdida.preguntaVerificacion).toBeNull();
+    const reclamar = (who: number, extra: Record<string, unknown>) =>
+      send(`/publicaciones/${perdida.id}/reclamos`, who, { mensaje: "Encontré tus llaves en la vereda.", ...extra });
+    const foto = await uploadProof(OTHER);
+
+    // Sin foto o sin barrio no hay reclamo, y un intento fallido no cuenta ni deja nada pendiente.
+    expect((await reclamar(OTHER, { barrio: "Palermo" })).data.error.code).toBe("PROOF_PHOTO_REQUIRED");
+    expect((await reclamar(OTHER, { fotoPrueba: foto.url })).data.error.code).toBe("BARRIO_REQUIRED");
+    expect((await get(`/publicaciones/${perdida.id}`, OTHER)).data.miReclamo).toBeNull();
+
+    // Intento 1: la persona dueña lo rechaza y no queda acceso a datos privados.
+    const c1 = await claim(perdida.id, OTHER);
+    expect(c1.intentos).toBe(1); expect(c1.estado).toBe("pendiente");
+    expect((await send(`/reclamos/${c1.id}/rechazar`, OWNER)).response.status).toBe(200);
+    let vista = (await get(`/publicaciones/${perdida.id}`, OTHER)).data;
+    expect(vista.estado).toBe("abierta"); expect(vista.miReclamo.estado).toBe("rechazado"); expect(vista.direccionExacta).toBeNull();
+
+    // Intento 2: se acepta y quien encontró cancela; la publicación se reabre y se revoca el acceso.
+    const c2 = await claim(perdida.id, OTHER);
+    expect(c2.id).toBe(c1.id); expect(c2.intentos).toBe(2);
+    expect((await send(`/reclamos/${c2.id}/aceptar`, OWNER)).response.status).toBe(200);
+    expect((await get(`/publicaciones/${perdida.id}`, OTHER)).data.direccionExacta).toBe("Calle privada 123");
+    expect((await send(`/reclamos/${c2.id}/cancelar`, OTHER)).response.status).toBe(200);
+    vista = (await get(`/publicaciones/${perdida.id}`, OTHER)).data;
+    expect(vista.estado).toBe("abierta"); expect(vista.direccionExacta).toBeNull();
+
+    // Intento 3: rechazado. El cuarto ya no se admite, aunque la evidencia sea válida.
+    const c3 = await claim(perdida.id, OTHER);
+    expect(c3.intentos).toBe(3);
+    expect((await send(`/reclamos/${c3.id}/rechazar`, OWNER)).response.status).toBe(200);
+    const cuarto = await reclamar(OTHER, { fotoPrueba: (await uploadProof(OTHER)).url, barrio: "Palermo" });
+    expect([cuarto.response.status, cuarto.data.error.code]).toEqual([409, "MAX_ATTEMPTS_EXCEEDED"]);
+    expect((await get("/me/historial", OWNER)).data.items).toEqual([]);
+
+    // El tope es por persona: otra cuenta reclama desde cero, se acepta y el caso se resuelve.
+    const otra = await claim(perdida.id, STRANGER);
+    expect(otra.intentos).toBe(1);
+    expect((await send(`/reclamos/${otra.id}/aceptar`, OWNER)).response.status).toBe(200);
+    expect((await get(`/publicaciones/${perdida.id}`, OTHER)).data.direccionExacta).toBeNull();
+    expect((await send(`/publicaciones/${perdida.id}/resolver`, OWNER)).response.status).toBe(200);
+    // En una pérdida quien agradece es la persona dueña, que recupera el objeto.
+    expect((await send(`/publicaciones/${perdida.id}/agradecimientos`, OWNER, { mensaje: "Gracias por encontrarlas" })).response.status).toBe(201);
+    expect((await send(`/publicaciones/${perdida.id}/agradecimientos`, STRANGER, { mensaje: "Gracias" })).response.status).toBe(403);
+    expect((await get(`/usuarios/${accounts[STRANGER]!.id}/agradecimientos`)).data.items[0].mensaje).toBe("Gracias por encontrarlas");
+    expect((await get(`/usuarios/${accounts[OTHER]!.id}`)).data.reputation.completedReturns).toBe(0);
+  });
+
+  test("registro, vencimiento y reenvío de OTP, y recuperación: el código y la contraseña anteriores dejan de servir", async () => {
+    const email = "recorrido@example.com";
+    const registro = { email, purpose: "registration" };
+    const pedir = async (body: { email: string; purpose: string }) => {
+      expect((await api("/auth/otp/request", "POST", body)).response.status).toBe(200);
+      return codes.get(`${body.email}:${body.purpose}`)!;
+    };
+    /** Reenvía tras la espera de 30 s hasta obtener un código distinto del anterior (la coincidencia es 1 en un millón). */
+    const reenviar = async (body: { email: string; purpose: string }, anterior: string) => {
+      for (let i = 0; i < 5; i++) {
+        db.update(otpCodes).set({ createdAt: new Date(Date.now() - 60_000).toISOString() }).where(eq(otpCodes.email, body.email)).run();
+        expect((await api("/auth/otp/resend", "POST", body)).response.status).toBe(200);
+        const nuevo = codes.get(`${body.email}:${body.purpose}`)!;
+        if (nuevo !== anterior) return nuevo;
+      }
+      throw new Error("El reenvío repitió el código cinco veces seguidas");
+    };
+
+    // Registro: el reenvío inmediato se frena; tras la espera, el código anterior queda inservible.
+    const primero = await pedir(registro);
+    expect((await api("/auth/otp/resend", "POST", registro)).response.status).toBe(429);
+    const segundo = await reenviar(registro, primero);
+    expect((await api("/auth/otp/check", "POST", { ...registro, code: primero })).response.status).toBe(400);
+    expect(db.select().from(otpCodes).where(eq(otpCodes.email, email)).all().filter((o) => !o.consumedAt)).toHaveLength(1);
+
+    // El vigente vence por tiempo: no se puede crear la cuenta y no queda ningún usuario.
+    db.update(otpCodes).set({ expiresAt: new Date(Date.now() - 1000).toISOString() }).where(eq(otpCodes.email, email)).run();
+    const vencido = await api("/auth/otp/verify", "POST", { ...registro, code: segundo, password });
+    expect([vencido.response.status, vencido.data.error.code]).toEqual([400, "OTP_EXPIRED"]);
+    expect(db.select().from(users).where(eq(users.email, email)).get()).toBeUndefined();
+
+    // Un código nuevo completa el registro y la sesión resultante funciona; el código se usa una sola vez.
+    const vigente = await reenviar(registro, segundo);
+    const alta = await api("/auth/otp/verify", "POST", { ...registro, code: vigente, password, name: "Persona Recorrido" });
+    expect(alta.response.status).toBe(200);
+    const sesionAlta = alta.data.session.token as string;
+    expect((await api("/me", "GET", undefined, sesionAlta)).data.email).toBe(email);
+    expect((await api("/auth/otp/verify", "POST", { ...registro, code: vigente, password })).response.status).toBe(400);
+    const otraSesion = (await api("/auth/login/password", "POST", { email, password })).data.session.token as string;
+    expect((await api("/me", "GET", undefined, otraSesion)).response.status).toBe(200);
+
+    // Recuperación: un reenvío reemplaza al código anterior; con el vigente cambia la contraseña.
+    const recuperar = { email, purpose: "set_password" };
+    const r1 = await pedir(recuperar);
+    const r2 = await reenviar(recuperar, r1);
+    const nueva = "Nueva12345";
+    expect((await api("/auth/otp/verify", "POST", { ...recuperar, code: r1, password: nueva })).response.status).toBe(400);
+    const reset = await api("/auth/otp/verify", "POST", { ...recuperar, code: r2, password: nueva });
+    expect(reset.response.status).toBe(200);
+    // Contrato de sesión: las anteriores se revocan; la que devuelve la recuperación sí sirve.
+    for (const token of [sesionAlta, otraSesion]) expect((await api("/me", "GET", undefined, token)).response.status).toBe(401);
+    expect((await api("/me", "GET", undefined, reset.data.session.token)).data.email).toBe(email);
+    expect((await api("/auth/login/password", "POST", { email, password })).response.status).toBe(401);
+    expect((await api("/auth/login/password", "POST", { email, password: nueva })).response.status).toBe(200);
+    // El código de recuperación ya usado no vuelve a servir.
+    expect((await api("/auth/otp/verify", "POST", { ...recuperar, code: r2, password: "Otra123456" })).response.status).toBe(400);
+    expect((await api("/auth/login/password", "POST", { email, password: nueva })).response.status).toBe(200);
+  });
+
+  test("alerta por radio, seguidas y perfil público: cinco devoluciones dan la insignia y la valoración vence a los 7 días", async () => {
+    const centro = { latitud: -34.6, longitud: -58.4 };
+    const norte = (km: number) => ({ latitud: centro.latitud + (km / 6371) * (180 / Math.PI), longitud: centro.longitud });
+    const alerta = await send("/alertas", OTHER, { filtros: { situacion: "perdi", categoria: "Llaves", palabras: "", periodo: "semana", ubicacion: centro, radioKm: 1 } });
+    expect(alerta.response.status).toBe(201); expect(alerta.data.filtros.radioKm).toBe(1);
+
+    const cerca = await publish({ titulo: "Llaves cerca", barrio: "", ubicacion: norte(0.4) });
+    const lejos = await publish({ titulo: "Llaves lejos", barrio: "", ubicacion: norte(3) });
+    const params = new URLSearchParams({ situacion: "perdi", categoria: "Llaves", periodo: "semana", latitud: String(centro.latitud), longitud: String(centro.longitud), radioKm: "1" });
+    expect((await get(`/publicaciones?${params}`, OTHER)).data.items.map((x: any) => x.id)).toEqual([cerca.id]);
+    const avisos = (await get("/notificaciones", OTHER)).data.items.filter((n: any) => n.tipo === "coincidencia");
+    expect(avisos.map((n: any) => n.publicacionId)).toEqual([cerca.id]);
+
+    // Resumen y lectura por grupo con el corte real, como los usa la app.
+    const resumen = (await get("/notificaciones/resumen", OTHER)).data;
+    expect(resumen.alertas).toEqual([{ alertaId: alerta.data.id, sinLeer: 1 }]);
+    const leida = await send("/notificaciones/grupo/leida", OTHER, { tipo: "alerta", id: alerta.data.id, corte: resumen.corte });
+    expect([leida.response.status, leida.data.marcadas, leida.data.resumen.alertas]).toEqual([200, 1, []]);
+
+    // Seguir una publicación: la edición avisa al seguidor y no a quien no sigue; dejar de seguir corta los avisos.
+    await send(`/publicaciones/${cerca.id}/seguir`, OTHER);
+    await send(`/publicaciones/${cerca.id}`, OWNER, { titulo: "Llaves cerca actualizadas" }, "PATCH");
+    expect((await get("/notificaciones/resumen", OTHER)).data.publicaciones).toEqual([{ publicacionId: cerca.id, sinLeer: 1 }]);
+    expect((await get("/notificaciones/resumen", STRANGER)).data.sinLeer).toBe(0);
+    expect((await get("/me/seguidas", OTHER)).data.items.map((x: any) => x.id)).toEqual([cerca.id]);
+    await send(`/publicaciones/${cerca.id}/seguir`, OTHER, undefined, "DELETE");
+    expect((await get("/me/seguidas", OTHER)).data.total).toBe(0);
+    await send(`/publicaciones/${lejos.id}`, OWNER, undefined, "DELETE");
+
+    // Cinco devoluciones reales: la insignia aparece recién con la quinta.
+    const resueltas: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const p = i === 0 ? cerca : await publish({ titulo: `Devolución ${i}` });
+      await accept(p.id);
+      expect((await send(`/publicaciones/${p.id}/resolver`, OWNER)).response.status).toBe(200);
+      resueltas.push(p.id);
+      const perfil = (await get(`/usuarios/${accounts[OWNER]!.id}`)).data;
+      expect(perfil.reputation.completedReturns).toBe(i + 1);
+      expect(perfil.badges.some((b: any) => b.name === "Vecino solidario")).toBe(i === 4);
+    }
+    const publico = JSON.stringify((await get(`/usuarios/${accounts[OWNER]!.id}`)).data);
+    for (const privado of ["1155550000", accounts[OWNER]!.email, "Calle privada"]) expect(publico).not.toContain(privado);
+
+    // Plazo de 7 días para valorar: a los 7 días y un segundo ya no, a los 6 sí.
+    const ultima = resueltas[4]!;
+    db.update(posts).set({ resolvedAt: new Date(Date.now() - 7 * DAY - 1000).toISOString() }).where(eq(posts.id, ultima)).run();
+    const tarde = await send(`/publicaciones/${ultima}/valoraciones`, OTHER, { positiva: true });
+    expect([tarde.response.status, tarde.data.error.code]).toEqual([409, "REVIEW_EXPIRED"]);
+    db.update(posts).set({ resolvedAt: new Date(Date.now() - 6 * DAY).toISOString() }).where(eq(posts.id, ultima)).run();
+    expect((await send(`/publicaciones/${ultima}/valoraciones`, OTHER, { positiva: true })).response.status).toBe(201);
+    expect((await get(`/usuarios/${accounts[OWNER]!.id}`)).data.reputation.positiveReviews).toBe(1);
+  });
+});
