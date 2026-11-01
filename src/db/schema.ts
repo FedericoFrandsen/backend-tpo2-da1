@@ -138,6 +138,8 @@ export const notifications = sqliteTable("hallado_notifications", {
   index("hallado_notificacion_usuario_idx").on(t.userId, t.createdAt),
   // Sin leer por alerta en /alertas y borrado en cascada de una alerta: evita recorrer todas las notificaciones.
   index("hallado_notificacion_alerta_idx").on(t.alertId, t.readAt),
+  // Resumen y lectura por grupo: solo recorren lo sin leer de la persona, no su historial leído.
+  index("hallado_notificacion_sinleer_idx").on(t.userId).where(sql`${t.readAt} IS NULL`),
 ]);
 
 export const messages = sqliteTable("hallado_messages", {

@@ -1,0 +1,1 @@
+CREATE INDEX `hallado_notificacion_sinleer_idx` ON `hallado_notifications` (`user_id`) WHERE "hallado_notifications"."read_at" IS NULL;
