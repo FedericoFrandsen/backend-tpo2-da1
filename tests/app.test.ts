@@ -322,8 +322,31 @@ describe("Hallado", () => {
     expect((await api(`/reclamos/${c.id}/rechazar`, "POST", undefined, accounts[0]!.token)).response.status).toBe(409);
     const a = (await api(`/usuarios/${accounts[0]!.id}`)).data;
     const b = (await api(`/usuarios/${accounts[1]!.id}`)).data;
+    // Devolvió quien publicó el hallazgo; quien solo recuperó lo suyo no suma.
     expect(a.reputation).toEqual({ completedReturns: 1, positiveReviews: 0, negativeReviews: 1 });
-    expect(b.reputation).toEqual({ completedReturns: 1, positiveReviews: 1, negativeReviews: 0 });
+    expect(b.reputation).toEqual({ completedReturns: 0, positiveReviews: 1, negativeReviews: 0 });
+  });
+  test("la reputación cuenta a quien devolvió: en un objeto perdido, a quien lo encontró y fue aceptado", async () => {
+    const perdida = await publish({ tipo: "perdi", titulo: "Llaves perdidas", preguntaVerificacion: undefined, respuestaVerificacion: undefined });
+    await accept(perdida.id);
+    expect((await api(`/publicaciones/${perdida.id}/resolver`, "POST", undefined, accounts[0]!.token)).response.status).toBe(200);
+    const perfil = async (i: number) => (await api(`/usuarios/${accounts[i]!.id}`)).data;
+    // Quien perdió el objeto y lo recuperó no suma; quien lo encontró y lo devolvió, sí.
+    expect((await perfil(0)).reputation.completedReturns).toBe(0);
+    expect((await perfil(1)).reputation.completedReturns).toBe(1);
+    // Un reclamo no aceptado o una publicación sin resolver tampoco suman.
+    const otra = await publish({ tipo: "perdi", titulo: "Otras llaves perdidas", preguntaVerificacion: undefined, respuestaVerificacion: undefined });
+    await accept(otra.id, 2);
+    expect((await perfil(2)).reputation.completedReturns).toBe(0);
+    // Y la insignia necesita cinco devoluciones hechas, no cinco casos resueltos.
+    for (let i = 0; i < 4; i++) {
+      const p = await publish({ tipo: "perdi", titulo: `Perdida ${i}`, preguntaVerificacion: undefined, respuestaVerificacion: undefined });
+      await accept(p.id); await api(`/publicaciones/${p.id}/resolver`, "POST", undefined, accounts[0]!.token);
+    }
+    const devolvedor = await perfil(1);
+    expect(devolvedor.reputation.completedReturns).toBe(5); expect(devolvedor.badges[0].name).toBe("Vecino solidario");
+    const recuperador = await perfil(0);
+    expect(recuperador.reputation.completedReturns).toBe(0); expect(recuperador.badges).toEqual([]);
   });
   test("Vecino solidario aparece tras cinco devoluciones reales", async () => {
     for (let i = 0; i < 5; i++) {
@@ -1406,7 +1429,7 @@ describe("listados paginados: contrato", () => {
     function expectedItem(c: Case, viewer: string) {
       const other = c.owner === viewer ? c.claimant : c.owner;
       const user = db.select().from(users).where(eq(users.id, other)).get()!;
-      const completed = all.filter((x) => x.estado === "resuelta" && (x.owner === other || (x.claim === "aceptado" && x.claimant === other))).length;
+      const completed = all.filter((x) => x.estado === "resuelta" && ((x.tipo === "encontrado" && x.owner === other) || (x.tipo === "perdido" && x.claim === "aceptado" && x.claimant === other))).length;
       const received = db.select().from(halladoReviews).where(eq(halladoReviews.reviewedUserId, other)).all();
       const mine = db.select().from(halladoReviews).where(eq(halladoReviews.reviewerId, viewer)).all().find((r) => r.publicationId === c.id);
       const thanked = db.select().from(thanks).where(eq(thanks.authorId, viewer)).all().find((t) => t.publicationId === c.id);

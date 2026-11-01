@@ -77,8 +77,9 @@ export function acceptedClaim(db: Store, postId: string) {
   return db.select().from(claims).where(and(eq(claims.publicationId, postId), eq(claims.estado, "aceptado"))).get();
 }
 /**
- * Perfiles públicos de varias personas con tres consultas, sin importar cuántas sean: usuarios, devoluciones
- * (publicaciones resueltas propias o con reclamo aceptado, sin contar dos veces una misma publicación) y valoraciones recibidas.
+ * Perfiles públicos de varias personas con tres consultas, sin importar cuántas sean: usuarios, devoluciones y valoraciones recibidas.
+ * Una devolución la suma quien devolvió el objeto (la misma regla que `returner` en el historial): el publicador de un
+ * `encontrado` resuelto o el reclamante con reclamo aceptado de un `perdido` resuelto. Quien solo recuperó lo suyo no suma.
  */
 export function publicProfiles(db: Store, userIds: string[]) {
   const ids = [...new Set(userIds)];
@@ -86,10 +87,10 @@ export function publicProfiles(db: Store, userIds: string[]) {
   if (!ids.length) return profiles;
   const found = db.select().from(users).where(inArray(users.id, ids)).all();
   const owned = db.select({ uid: posts.userId, pid: posts.id }).from(posts)
-    .where(and(eq(posts.estado, "resuelta"), inArray(posts.userId, ids)));
+    .where(and(eq(posts.estado, "resuelta"), eq(posts.tipo, "encontrado"), inArray(posts.userId, ids)));
   const claimed = db.select({ uid: claims.userId, pid: posts.id }).from(claims)
     .innerJoin(posts, eq(posts.id, claims.publicationId))
-    .where(and(eq(posts.estado, "resuelta"), eq(claims.estado, "aceptado"), inArray(claims.userId, ids)));
+    .where(and(eq(posts.estado, "resuelta"), eq(posts.tipo, "perdido"), eq(claims.estado, "aceptado"), inArray(claims.userId, ids)));
   const returns = union(owned, claimed).as("returns");
   const completed = new Map(db.select({ uid: returns.uid, n: count() }).from(returns).groupBy(returns.uid).all().map((r) => [r.uid, r.n]));
   const reviews = db.select({ uid: halladoReviews.reviewedUserId, positiva: halladoReviews.positiva, n: count() }).from(halladoReviews)

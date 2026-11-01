@@ -91,6 +91,8 @@ Campos del perfil:
 }
 ```
 
+`completedReturns` (y la insignia, que llega a las 5) cuenta solo a quien **devolvió** el objeto: el publicador de un `encontrado` resuelto, o el reclamante con reclamo aceptado de un `perdido` resuelto. Quien solo recuperó lo suyo no suma. Es la misma regla que `tipo: "devolvi"` en `GET /me/historial`.
+
 El perfil privado agrega email, username, phone, sharePhone y hasPassword. `sharePhone` es false por defecto. La API ignora campos como reputación o insignias al editar: se calculan a partir de devoluciones y valoraciones, no se aceptan contadores enviados por el cliente.
 
 ## Buscador y resultados

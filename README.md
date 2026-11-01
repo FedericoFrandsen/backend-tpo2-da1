@@ -78,7 +78,7 @@ Si una cuenta demo ya existía, se conserva su contraseña anterior. Las fotos d
 - Contraseñas con letras y números, entre 8 y 72 caracteres; hash Argon2 de Bun. Los tokens se guardan como SHA-256.
 - Perfil editable: nombre, foto, barrio, teléfono y consentimiento para compartirlo.
 - Perfil público sin email, teléfono ni historial de publicaciones.
-- Reputación calculada por devoluciones concretadas y valoraciones; insignia Vecino solidario al alcanzar cinco devoluciones.
+- Reputación calculada por devoluciones concretadas y valoraciones; insignia Vecino solidario al alcanzar cinco devoluciones. Una devolución la suma quien devolvió el objeto (el publicador de un hallazgo resuelto o el reclamante aceptado de un objeto perdido resuelto); quien solo recuperó lo suyo no suma.
 - Búsqueda del tipo opuesto, categoría, palabras sin distinción de tildes/mayúsculas, barrio, períodos/rango, coordenadas y radio.
 - Resultados paginados y ordenados por fecha o cercanía; hasta cinco búsquedas recientes por usuario.
 - Publicaciones perdidas/encontradas: creación, edición, eliminación lógica, fotos y gestión de estados. Barrio del catálogo (91 entradas: CABA y GBA), dirección exacta y hora `HH:MM` obligatorios; la franja se deriva de la hora.
