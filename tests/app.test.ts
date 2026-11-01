@@ -3286,3 +3286,54 @@ describe("mensaje del reclamo opcional", () => {
     expect(ok.response.status).toBe(201); expect(ok.data.mensaje).toBe("Son mías");
   });
 });
+
+describe("barrio del perfil", () => {
+  const patchMe = (body: Record<string, unknown>, account = 0) => api("/me", "PATCH", body, accounts[account]!.token);
+  const stored = (account = 0) => db.select().from(users).where(eq(users.id, accounts[account]!.id)).get()!.zone;
+
+  test("PATCH /me: el barrio es del catálogo (nombre canónico) o vacío; otro valor da 422 INVALID_BARRIO", async () => {
+    const ok = await patchMe({ zone: "  villa urquiza " });
+    expect(ok.response.status).toBe(200); expect(ok.data.zone).toBe("Villa Urquiza"); expect(stored()).toBe("Villa Urquiza");
+    expect((await patchMe({ zone: "NÚÑEZ" })).data.zone).toBe("Núñez");
+    const mal = await patchMe({ zone: "Villa Inventada" });
+    expect(mal.response.status).toBe(422); expect(mal.data.error.code).toBe("INVALID_BARRIO");
+    expect(stored()).toBe("Núñez");
+    // Vaciar es válido, con null o con texto en blanco.
+    expect((await patchMe({ zone: null })).data.zone).toBeNull();
+    await patchMe({ zone: "Palermo" });
+    expect((await patchMe({ zone: "   " })).data.zone).toBeNull();
+    // Sin zone, el barrio no cambia.
+    await patchMe({ zone: "Belgrano" });
+    expect((await patchMe({ name: "Otro nombre" })).data.zone).toBe("Belgrano");
+  });
+
+  test("PATCH /me: reenviar sin cambios el texto libre que ya tenía no falla; cambiarlo a otro texto libre, sí", async () => {
+    db.update(users).set({ zone: "Mi barrio privado" }).where(eq(users.id, accounts[1]!.id)).run();
+    const igual = await patchMe({ zone: "Mi barrio privado", name: "Con barrio viejo" }, 1);
+    expect(igual.response.status).toBe(200); expect(igual.data.zone).toBe("Mi barrio privado"); expect(stored(1)).toBe("Mi barrio privado");
+    expect((await patchMe({ zone: "Otro barrio privado" }, 1)).data.error.code).toBe("INVALID_BARRIO");
+    expect(stored(1)).toBe("Mi barrio privado");
+    // Salir del texto libre a un barrio del catálogo funciona, y ya no se puede volver.
+    expect((await patchMe({ zone: "Caballito" }, 1)).data.zone).toBe("Caballito");
+    expect((await patchMe({ zone: "Mi barrio privado" }, 1)).data.error.code).toBe("INVALID_BARRIO");
+  });
+
+  test("el registro valida el barrio antes de gastar el código y guarda el nombre canónico", async () => {
+    const email = "barrio@example.com";
+    await api("/auth/otp/request", "POST", { email, purpose: "registration" });
+    const code = codes.get(`${email}:registration`);
+    const body = { email, purpose: "registration", code, password, name: "Con barrio" };
+    const mal = await api("/auth/otp/verify", "POST", { ...body, zone: "Villa Inventada" });
+    expect(mal.response.status).toBe(422); expect(mal.data.error.code).toBe("INVALID_BARRIO");
+    expect(db.select().from(users).where(eq(users.email, email)).all()).toHaveLength(0);
+    const otp = db.select().from(otpCodes).where(eq(otpCodes.email, email)).get()!;
+    expect(otp.consumedAt).toBeNull(); expect(otp.attempts).toBe(0);
+    const ok = await api("/auth/otp/verify", "POST", { ...body, zone: "lomas de zamora" });
+    expect(ok.response.status).toBe(200); expect(ok.data.usuario.zone).toBe("Lomas de Zamora");
+    // Sin barrio, el registro sigue funcionando.
+    const other = "sinbarrio@example.com";
+    await api("/auth/otp/request", "POST", { email: other, purpose: "registration" });
+    const sin = await api("/auth/otp/verify", "POST", { email: other, purpose: "registration", code: codes.get(`${other}:registration`), password });
+    expect(sin.response.status).toBe(200); expect(sin.data.usuario.zone).toBeNull();
+  });
+});

@@ -76,7 +76,7 @@ Si una cuenta demo ya existía, se conserva su contraseña anterior. Las fotos d
 - Login por email/contraseña, sesiones Bearer y logout.
 - Recupero con OTP, reenvío, expiración, cinco intentos y revocación de sesiones anteriores.
 - Contraseñas con letras y números, entre 8 y 72 caracteres; hash Argon2 de Bun. Los tokens se guardan como SHA-256.
-- Perfil editable: nombre, foto, barrio, teléfono y consentimiento para compartirlo.
+- Perfil editable: nombre, foto, barrio del catálogo, teléfono y consentimiento para compartirlo.
 - Perfil público sin email, teléfono ni historial de publicaciones.
 - Reputación calculada por devoluciones concretadas y valoraciones; insignia Vecino solidario al alcanzar cinco devoluciones. Una devolución la suma quien devolvió el objeto (el publicador de un hallazgo resuelto o el reclamante aceptado de un objeto perdido resuelto); quien solo recuperó lo suyo no suma.
 - Búsqueda del tipo opuesto, categoría, palabras sin distinción de tildes/mayúsculas, barrio, períodos/rango, coordenadas y radio.

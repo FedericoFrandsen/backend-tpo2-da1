@@ -4,9 +4,21 @@ import { requireUser } from "../auth";
 import type { AppDatabase } from "../database";
 import { halladoReviews, users, uploads } from "../db/schema";
 import { ApiError } from "../errors";
-import { privateProfile, publicProfile } from "../queries";
+import { privateProfile, publicProfile, zoneName } from "../queries";
 import { cleanText, paginate } from "../utils";
 
+/**
+ * Barrio del perfil: del catálogo (se guarda el nombre canónico) o vacío. Reenviar sin cambios el valor que la persona ya
+ * tenía no falla, para no bloquear perfiles con el texto libre de antes.
+ */
+function profileZone(value: string | null, current: string | null) {
+  const zone = value?.trim();
+  if (!zone) return null;
+  const canonical = zoneName(zone);
+  if (canonical) return canonical;
+  if (zone === current?.trim()) return current;
+  throw new ApiError(422, "INVALID_BARRIO", "Elegí un barrio de la lista");
+}
 const nullableText = (maxLength: number) => t.Union([t.String({ maxLength }), t.Null()]);
 export function userRoutes(db: AppDatabase) {
   const getPublic = (id: string) => publicProfile(db, id);
@@ -32,7 +44,7 @@ export function userRoutes(db: AppDatabase) {
       }
       const changes = {
         ...(body.name !== undefined ? { name: cleanText(body.name, 2, "nombre") } : {}),
-        ...(body.zone !== undefined ? { zone: body.zone?.trim() || null } : {}),
+        ...(body.zone !== undefined ? { zone: profileZone(body.zone, user.zone) } : {}),
         ...(body.phone !== undefined ? { phone: body.phone?.trim() || null } : {}),
         ...(body.sharePhone !== undefined ? { sharePhone: body.sharePhone } : {}),
         ...(body.avatarUrl !== undefined ? { avatarUrl: body.avatarUrl } : {}),

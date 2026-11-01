@@ -72,7 +72,7 @@ El parámetro `purpose` tiene que viajar entre pantallas: no se puede deducir so
 ## Perfil: usePerfil y usePerfilPublico
 
 - `GET /me`: perfil privado del token.
-- `PATCH /me`: `{ name?, zone?, phone?, sharePhone?, avatarUrl? }`.
+- `PATCH /me`: `{ name?, zone?, phone?, sharePhone?, avatarUrl? }`. `zone` debe ser un barrio de `GET /barrios` (se guarda el nombre canónico) o `null`/vacío para borrarlo; si no, 422 `INVALID_BARRIO`. Reenviar sin cambios el valor que la persona ya tenía guardado no falla, para no bloquear perfiles con el texto libre anterior. El `zone` opcional del registro (`POST /auth/otp/verify` con `purpose: "registration"`) sigue la misma regla y se valida antes de consumir el código.
 - `GET /usuarios/:id`: perfil público, sin teléfono, email ni historial.
 - `GET /usuarios/:id/valoraciones`: valoraciones recibidas, paginadas.
 - Compatibilidad: `/users/:id` y `/users/:id/reviews`.

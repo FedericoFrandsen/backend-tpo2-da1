@@ -12,7 +12,7 @@ import type { AppDatabase } from "../database";
 import { loginAttempts, otpCodes, sessions, users } from "../db/schema";
 import { ApiError } from "../errors";
 import { normalizeEmail, nowIso } from "../utils";
-import { privateProfile } from "../queries";
+import { privateProfile, zoneName } from "../queries";
 import { sendOtp, type OtpSender } from "../mailer";
 import { PASSWORD_MAX_LENGTH, validarPassword } from "../validations/auth";
 
@@ -257,6 +257,12 @@ async function completeOtp(db: AppDatabase, body: OtpVerify) {
     }
   }
 
+  // Antes de verificar el código, para que un barrio inválido no gaste un intento ni el código.
+  if (body.purpose === "registration" && body.zone !== undefined) {
+    const zone = zoneName(body.zone);
+    if (!zone) throw new ApiError(422, "INVALID_BARRIO", "Elegí un barrio de la lista");
+    body = { ...body, zone };
+  }
   const email = normalizeEmail(body.email);
   const otpId = await verifyOtp(db, email, body);
   const passwordHash = body.purpose !== "login" && body.password
