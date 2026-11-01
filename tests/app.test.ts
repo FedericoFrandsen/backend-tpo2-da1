@@ -1627,6 +1627,59 @@ describe("listados paginados: contrato", () => {
     void u2;
   });
 
+  test("/usuarios/:id/agradecimientos: ordena por alta e id, pagina en cuatro páginas, repite autores y no filtra datos privados", async () => {
+    const recipient = uid(0);
+    const authors = [uid(1), uid(2), addUser("gracias-a"), addUser("gracias-b")];
+    // Marcas repetidas: el desempate por id es el que fija el orden dentro del mismo instante.
+    const stamps = [0, 1, 2, 3, 3, 3, 6, 7, 8, 8, 10, 11, 12, 12];
+    const fixture = stamps.map((n, i) => ({ id: `g-${String(i).padStart(2, "0")}`, createdAt: at(300 + n), authorId: authors[i % authors.length]! }));
+    for (const g of fixture) {
+      insertPost({ id: `pub-${g.id}`, estado: "resuelta", resolvedAt: g.createdAt });
+      db.insert(thanks).values({ id: g.id, publicationId: `pub-${g.id}`, authorId: g.authorId, recipientId: recipient, mensaje: `Gracias ${g.id}`, createdAt: g.createdAt }).run();
+    }
+    // Agradecimientos a otra persona: no aparecen ni cuentan.
+    for (const id of ["ajeno-1", "ajeno-2"]) {
+      insertPost({ id: `pub-${id}`, estado: "resuelta", resolvedAt: at(1) });
+      db.insert(thanks).values({ id, publicationId: `pub-${id}`, authorId: authors[0]!, recipientId: uid(2), mensaje: "No es tuyo", createdAt: at(999) }).run();
+    }
+    const expected = descending(fixture, (g) => g.createdAt, (g) => g.id);
+    const page = async (query: string, id = recipient) => {
+      const { response, data } = await api(`/usuarios/${id}/agradecimientos${query}`);
+      expect(response.status).toBe(200);
+      return data;
+    };
+    for (const size of [4, 5, 100]) {
+      const seen: string[] = [];
+      const totalPages = Math.ceil(fixture.length / size);
+      for (let n = 1; n <= totalPages; n++) {
+        const data = await page(`?page=${n}&pageSize=${size}`);
+        expect(data).toMatchObject({ page: n, pageSize: size, total: fixture.length, totalPages });
+        seen.push(...data.items.map((x: any) => x.id));
+      }
+      expect(seen).toEqual(expected.map((g) => g.id));
+    }
+    expect(await page(`?page=99`)).toEqual({ items: [], page: 99, pageSize: 20, total: fixture.length, totalPages: 1 });
+    const first = (await page("?pageSize=100")).items[0];
+    // Solo mensaje, fecha y el perfil público del autor: ni la publicación ni datos de contacto.
+    expect(Object.keys(first).sort()).toEqual(["autor", "createdAt", "id", "mensaje"]);
+    expect(first).toMatchObject({ id: expected[0]!.id, mensaje: `Gracias ${expected[0]!.id}`, createdAt: expected[0]!.createdAt });
+    expect(Object.keys(first.autor).sort()).toEqual(["avatarUrl", "badges", "id", "memberSince", "name", "reputation", "zone"]);
+    expect(first.autor.reputation).toEqual({ completedReturns: 0, positiveReviews: 0, negativeReviews: 0 });
+    // Los autores se repiten en la página y cada uno conserva su propio perfil.
+    const all = (await page("?pageSize=100")).items;
+    expect(all.map((x: any) => x.autor.id)).toEqual(expected.map((g) => g.authorId));
+    // Sin agradecimientos, la lista vacía mantiene el contrato; un usuario inexistente es 404.
+    expect(await page("", uid(1))).toEqual({ items: [], page: 1, pageSize: 20, total: 0, totalPages: 0 });
+    const missing = await api("/usuarios/no-existe/agradecimientos");
+    expect(missing.response.status).toBe(404);
+    expect(missing.data.error.code).toBe("USER_NOT_FOUND");
+    for (const bad of ["page=0", "pageSize=101", "pageSize=x"]) {
+      const r = await api(`/usuarios/${recipient}/agradecimientos?${bad}`);
+      expect(r.response.status).toBe(422);
+      expect(r.data.error.code).toBe("INVALID_PAGINATION");
+    }
+  });
+
   test("localDayBounds: el primer instante de cada día local, en varias zonas, con horario de verano y bordes", () => {
     const iso = (t: number) => new Date(t).toISOString();
     const zones = ["America/Argentina/Buenos_Aires", "UTC", "Asia/Tokyo", "America/New_York", "Pacific/Kiritimati", "Pacific/Pago_Pago", "Australia/Lord_Howe", "America/Sao_Paulo"];
@@ -1684,7 +1737,7 @@ describe("listados paginados: contrato", () => {
     const WRITE = /^\s*(insert|update|delete|replace|create|drop|alter)/i;
 
     /** Ejecuta la request registrando cada consulta SQL y las filas que SQLite entrega a la aplicación. */
-    async function measure(path: string, account: number) {
+    async function measure(path: string, account: number | null) {
       const statements: Statement[] = [];
       const original = db.$client.query.bind(db.$client);
       (db.$client as any).query = (text: string) => {
@@ -1701,16 +1754,17 @@ describe("listados paginados: contrato", () => {
         });
       };
       try {
-        const result = await get(path, account);
+        const result = account === null ? await api(path) : await get(path, account);
         // La autenticación (una consulta a sesiones y usuarios) es la misma para cualquier tamaño y queda fuera del conteo.
+        // Los endpoints públicos (account null) no autentican.
         const counted = statements.filter((s) => !/"sessions"/i.test(s.sql));
-        expect(statements.length - counted.length).toBe(1);
+        expect(statements.length - counted.length).toBe(account === null ? 0 : 1);
         return { ...result, statements: counted, rows: counted.reduce((n, s) => n + s.rows, 0), maxRows: Math.max(0, ...counted.map((s) => s.rows)) };
       } finally { (db.$client as any).query = original; }
     }
     /** Mide los tamaños 1/20/100 y exige consultas acotadas, iguales entre tamaños y filas proporcionales a la página. */
-    async function bounded(path: string, account: number, total: number, maxStatements: number) {
-      await get(`${path}${path.includes("?") ? "&" : "?"}pageSize=1`, account); // las escrituras de reconciliación se hacen una sola vez
+    async function bounded(path: string, account: number | null, total: number, maxStatements: number) {
+      await (account === null ? api(`${path}${path.includes("?") ? "&" : "?"}pageSize=1`) : get(`${path}${path.includes("?") ? "&" : "?"}pageSize=1`, account)); // las escrituras de reconciliación se hacen una sola vez
       const counts: number[] = [];
       for (const size of SIZES) {
         const m = await measure(`${path}${path.includes("?") ? "&" : "?"}pageSize=${size}`, account);
@@ -1736,8 +1790,9 @@ describe("listados paginados: contrato", () => {
     const casesPage = (s: Statement) => /from "hallado_publications" inner join "hallado_claims"/.test(s.sql) && /order by/i.test(s.sql);
     const alertsPage = (s: Statement) => /from "hallado_alerts"/.test(s.sql) && /order by/i.test(s.sql);
     const notificationsPage = (s: Statement) => /from "hallado_notifications"/.test(s.sql) && /order by/i.test(s.sql);
+    const thanksPage = (s: Statement) => /from "hallado_thanks"/.test(s.sql) && /order by/i.test(s.sql);
     /** Una página posterior a la primera agrega OFFSET a la misma consulta, con un máximo de filas igual al tamaño. */
-    async function expectOffset(path: string, account: number, isPage: (s: Statement) => boolean) {
+    async function expectOffset(path: string, account: number | null, isPage: (s: Statement) => boolean) {
       const m = await measure(`${path}?page=2&pageSize=20`, account);
       const page = m.statements.find(isPage)!;
       expect(page.sql).toMatch(/ limit \? offset \?/i);
@@ -1831,6 +1886,39 @@ describe("listados paginados: contrato", () => {
       const plan = planOf((await run(20)).statements);
       expect(plan).toContain("hallado_notificacion_alerta_idx (alert_id=? AND read_at=?)");
       expect(plan).not.toMatch(/SCAN hallado_notifications/);
+    });
+
+    test("/usuarios/:id/agradecimientos: cuenta y trae solo la página, y resuelve los perfiles de los autores en lote", async () => {
+      const recipient = uid(0);
+      const authors = Array.from({ length: 12 }, (_, n) => addUser(`autor-${n}`));
+      for (let i = 0; i < 150; i++) {
+        const id = `ga-${String(i).padStart(3, "0")}`;
+        insertPost({ id, estado: "resuelta", resolvedAt: at(i) });
+        db.insert(thanks).values({ id, publicationId: id, authorId: authors[i % authors.length]!, recipientId: recipient, mensaje: `Gracias ${i}`, createdAt: at(i) }).run();
+      }
+      // Un dataset mucho mayor de agradecimientos ajenos no cambia el trabajo de esta página.
+      for (let i = 0; i < 150; i++) {
+        const id = `gb-${String(i).padStart(3, "0")}`;
+        insertPost({ id, estado: "resuelta", resolvedAt: at(i) });
+        db.insert(thanks).values({ id, publicationId: id, authorId: authors[i % authors.length]!, recipientId: uid(2), mensaje: "Ajeno", createdAt: at(i) }).run();
+      }
+      // Perfil del receptor, total, página y los tres lotes de perfiles de autores: no crece con el tamaño de la página.
+      const run = await bounded(`/usuarios/${recipient}/agradecimientos`, null, 150, 8);
+      for (const size of SIZES) {
+        const m = await run(size);
+        const page = m.statements.find(thanksPage)!;
+        expect(page.sql).toMatch(/ limit \?/i);
+        expect(page.rows).toBe(size);
+        // Ningún SELECT de agradecimientos trae las 150 filas para paginar en memoria.
+        expect(m.statements.filter((s) => /from "hallado_thanks"/.test(s.sql)).every((s) => s.rows <= size)).toBe(true);
+      }
+      await expectOffset(`/usuarios/${recipient}/agradecimientos`, null, thanksPage);
+      // La página sale ordenada del índice compuesto del receptor: no ordena en memoria todos sus agradecimientos.
+      const measured = (await run(20)).statements;
+      const pagePlan = planOf(measured.filter(thanksPage));
+      expect(pagePlan).toContain("hallado_agradecimiento_pagina_idx (recipient_id=?)");
+      expect(pagePlan).not.toMatch(/TEMP B-TREE/);
+      expect(planOf(measured)).not.toMatch(/SCAN hallado_(thanks|users|publications|claims|reviews)/);
     });
 
     test("/notificaciones: reconcilia, pagina y obtiene total y sinLeer en SQL sin traer todas las filas", async () => {

@@ -6,7 +6,7 @@ import type { AppDatabase } from "../database";
 import { claims, halladoPublications as posts, halladoReviews, thanks } from "../db/schema";
 import { ApiError } from "../errors";
 import { acceptedClaim, getPost, publicProfile, publicProfiles } from "../queries";
-import { cleanText, localDayBounds, nowIso, pageResult, pageWindow, paginate, reviewDeadline, validDate } from "../utils";
+import { cleanText, localDayBounds, nowIso, pageResult, pageWindow, reviewDeadline, validDate } from "../utils";
 
 export function historyRoutes(db: AppDatabase) {
   return new Elysia()
@@ -87,9 +87,17 @@ export function historyRoutes(db: AppDatabase) {
     }, { body: t.Object({ mensaje: t.String({ minLength: 1, maxLength: 500 }) }) })
     .get("/usuarios/:id/agradecimientos", ({ params, query }) => {
       publicProfile(db, params.id);
+      const window = pageWindow(query);
+      const mine = eq(thanks.recipientId, params.id);
+      const total = db.select({ n: count() }).from(thanks).where(mine).get()!.n;
       const rows = db.select({ id: thanks.id, mensaje: thanks.mensaje, createdAt: thanks.createdAt, authorId: thanks.authorId })
-        .from(thanks).where(eq(thanks.recipientId, params.id)).orderBy(desc(thanks.createdAt), desc(thanks.id)).all();
-      const page = paginate(rows, query);
-      return { ...page, items: page.items.map(({ authorId, ...item }) => ({ ...item, autor: publicProfile(db, authorId) })) };
+        .from(thanks).where(mine).orderBy(desc(thanks.createdAt), desc(thanks.id)).limit(window.pageSize).offset(window.offset).all();
+      // Un autor puede repetirse en la página: sus perfiles se resuelven una sola vez y en lote, no uno por agradecimiento.
+      const authors = publicProfiles(db, rows.map((r) => r.authorId));
+      return pageResult(rows.map(({ authorId, ...item }) => {
+        const autor = authors.get(authorId);
+        if (!autor) throw new ApiError(404, "USER_NOT_FOUND", "No encontramos el usuario");
+        return { ...item, autor };
+      }), window, total);
     });
 }

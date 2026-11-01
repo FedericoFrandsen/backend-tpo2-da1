@@ -104,6 +104,8 @@ export const thanks = sqliteTable("hallado_thanks", {
 }, (t) => [
   uniqueIndex("hallado_agradecimiento_unique").on(t.publicationId),
   index("hallado_agradecimiento_usuario_idx").on(t.recipientId),
+  // Página de agradecimientos recibidos: filtra por receptor y ya sale ordenada por alta e id.
+  index("hallado_agradecimiento_pagina_idx").on(t.recipientId, t.createdAt, t.id),
 ]);
 
 export const alerts = sqliteTable("hallado_alerts", {

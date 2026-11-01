@@ -1,0 +1,1 @@
+CREATE INDEX `hallado_agradecimiento_pagina_idx` ON `hallado_thanks` (`recipient_id`,`created_at`,`id`);
