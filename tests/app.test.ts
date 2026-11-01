@@ -2337,3 +2337,92 @@ describe("resumen de notificaciones sin leer y lectura por grupo", () => {
     expect((await resumen(2)).publicaciones).toEqual([{ publicacionId: "p-1", sinLeer: 1 }]);
   });
 });
+
+// Catálogo geográfico y de categorías (plan 009). Los nombres de barrio y categoría son la identidad que
+// guardan publicaciones y alertas: cualquier cambio del catálogo tiene que conservarlos.
+describe("Catálogo de categorías y barrios", () => {
+  const normalized = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
+  test("categorías y barrios: formato histórico, alias idénticos y nombres únicos aun sin tildes ni mayúsculas", async () => {
+    const [categorias, categories, barrios, zones] = await Promise.all(["/categorias", "/categories", "/barrios", "/zones"].map((p) => api(p)));
+    for (const r of [categorias, categories, barrios, zones]) expect(r.response.status).toBe(200);
+    expect(categorias.data).toEqual(["Documentos", "Llaves", "Electrónica", "Mascotas", "Ropa", "Otros"]);
+    expect(categories.data).toEqual(categorias.data);
+    expect(zones.data).toEqual(barrios.data);
+    expect(barrios.data.map((z: any) => z.nombre)).toEqual(["Centro", "Palermo", "Recoleta", "Belgrano", "Caballito", "Almagro"]);
+    for (const z of barrios.data) {
+      expect(Object.keys(z).sort()).toEqual(["latitud", "longitud", "nombre"]);
+      expect(Math.abs(z.latitud)).toBeLessThanOrEqual(90); expect(Math.abs(z.longitud)).toBeLessThanOrEqual(180);
+    }
+    // Dos barrios homónimos (p. ej. «Núñez» y «Nunez») se fusionarían al buscar por nombre: el catálogo no puede tenerlos.
+    expect(new Set(barrios.data.map((z: any) => normalized(z.nombre))).size).toBe(barrios.data.length);
+    expect(new Set(categorias.data.map(normalized)).size).toBe(categorias.data.length);
+  });
+
+  test("las respuestas declaran la versión del catálogo, estable entre pedidos y legible desde otros orígenes", async () => {
+    // Metadata aditiva en los endpoints existentes: el cuerpo (un arreglo) no cambia.
+    const [a, b, c] = await Promise.all(["/categorias", "/barrios", "/zones"].map((p) => api(p)));
+    const version = a.response.headers.get("x-catalogo-version");
+    expect(version).toMatch(/^[0-9a-f]{8}$/);
+    // Valor fijo: el cliente calcula la misma huella con el catálogo que trae incluido (hallado, services/catalogos.js).
+    // Si cambia a propósito la lista, hay que actualizar este valor y el de la prueba del cliente.
+    expect(version).toBe("fe067df2");
+    expect(b.response.headers.get("x-catalogo-version")).toBe(version);
+    expect(c.response.headers.get("x-catalogo-version")).toBe(version);
+    expect(a.response.headers.get("access-control-expose-headers")).toContain("x-catalogo-version");
+    // Solo los catálogos la llevan.
+    expect((await api("/health")).response.headers.get("x-catalogo-version")).toBeNull();
+  });
+
+  test("el barrio publicado se guarda como se escribió y toma las coordenadas del centro del catálogo", async () => {
+    const barrios = (await api("/barrios")).data as { nombre: string; latitud: number; longitud: number }[];
+    const palermo = barrios.find((z) => z.nombre === "Palermo")!;
+    const p = await publish({ barrio: "  PÁLERMO " });
+    const row = db.select().from(posts).where(eq(posts.id, p.id)).get()!;
+    expect(row.barrio).toBe("PÁLERMO");
+    expect([row.latitud, row.longitud]).toEqual([palermo.latitud, palermo.longitud]);
+    // El filtro textual ignora tildes y mayúsculas: encuentra la publicación con cualquier grafía.
+    for (const zona of ["Palermo", "palermo", "PALERMO", "Pálermo"]) {
+      expect((await api(query({ zona, situacion: "perdi" }))).data.items.map((i: any) => i.id)).toEqual([p.id]);
+    }
+  });
+
+  test("GPS fuera del catálogo: no se infiere ningún barrio ni se reemplaza el elegido", async () => {
+    const cordoba = { latitud: -31.4201, longitud: -64.1888 };
+    const p = await publish({ barrio: undefined, ubicacion: cordoba, titulo: "Llaves en Córdoba" });
+    expect(p.barrio).toBe("Ubicación actual");
+    const row = db.select().from(posts).where(eq(posts.id, p.id)).get()!;
+    expect([row.latitud, row.longitud]).toEqual([cordoba.latitud, cordoba.longitud]);
+    // Con un barrio y GPS a la vez, vale el GPS para el orden y el barrio queda como lo eligió la persona.
+    const q = await publish({ barrio: "Palermo", ubicacion: cordoba, titulo: "Llaves GPS y barrio" });
+    expect(q.barrio).toBe("Palermo");
+    // Búsqueda por GPS lejos de todo barrio: solo entra lo que cae dentro del radio.
+    const gps = await api(query({ zona: "", latitud: String(cordoba.latitud), longitud: String(cordoba.longitud), radioKm: "5" }));
+    expect(gps.data.items.map((i: any) => i.id).sort()).toEqual([p.id, q.id].sort());
+    expect((await api(query({ zona: "", latitud: "-34.5889", longitud: "-58.4306", radioKm: "5" }))).data.total).toBe(0);
+    // Un barrio fuera del catálogo sin coordenadas no se acepta ni se adivina.
+    const sinLugar = await api("/publicaciones", "POST", postBody({ barrio: "Villa Inventada" }), accounts[0]!.token);
+    expect(sinLugar.response.status).toBe(422); expect(sinLugar.data.error.code).toBe("LOCATION_REQUIRED");
+  });
+
+  test("el centro del barrio solo ordena: «cercanos» no excluye a los lejanos y un barrio desconocido no ordena", async () => {
+    const lejos = await publish({ titulo: "Llaves lejos del centro", ubicacion: { latitud: -34.5, longitud: -58.5 } });
+    const centro = await publish({ titulo: "Llaves en el centro de Palermo", ubicacion: { latitud: -34.5889, longitud: -58.4306 } });
+    const result = await api(query({ orden: "cercanos" }));
+    expect(result.data.items.map((i: any) => i.id)).toEqual([centro.id, lejos.id]);
+    expect(result.data.items[0].distancia).toBe(0);
+    const desconocido = await api(query({ zona: "Villa Inventada", orden: "cercanos" }));
+    expect(desconocido.response.status).toBe(422); expect(desconocido.data.error.code).toBe("LOCATION_REQUIRED");
+  });
+
+  test("alertas guardadas con la grafía histórica del barrio y de la categoría siguen avisando", async () => {
+    const guardada = await api("/alertas", "POST", { filtros: { situacion: "perdi", categoria: "Electrónica", zona: "Pálermo", periodo: "semana" } }, accounts[1]!.token);
+    expect(guardada.response.status).toBe(201);
+    const p = await publish({ categoria: "Electrónica", barrio: "palermo", titulo: "Auriculares inalámbricos" });
+    const avisos = db.select().from(notifications).where(eq(notifications.userId, accounts[1]!.id)).all();
+    expect(avisos.some((n) => n.tipo === "coincidencia" && n.publicationId === p.id)).toBe(true);
+    const busqueda = await api(query({ categoria: "Electrónica" }), "GET", undefined, accounts[1]!.token);
+    expect(busqueda.data.items.map((i: any) => i.id)).toEqual([p.id]);
+    expect((await api("/me/busquedas", "GET", undefined, accounts[1]!.token)).data.items[0].filtros.categoria).toBe("Electrónica");
+  });
+});

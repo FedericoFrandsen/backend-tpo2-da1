@@ -8,6 +8,20 @@ export const ZONES = [
   { nombre: "Caballito", latitud: -34.6187, longitud: -58.4414 },
   { nombre: "Almagro", latitud: -34.6111, longitud: -58.4206 },
 ];
+/**
+ * Versión del catálogo (categorías y centros de barrio): huella FNV-1a (sobre las unidades UTF-16 del JSON) de su contenido, así cambia sola cuando cambia la
+ * lista. Los endpoints de catálogo la envían en `x-catalogo-version` para que el cliente sepa qué copia guarda. El centro
+ * de un barrio es una referencia para ordenar por cercanía, no la posición exacta de un suceso.
+ */
+export const CATALOG_VERSION_HEADER = "x-catalogo-version";
+export const CATALOG_PATHS = new Set(["/categorias", "/categories", "/barrios", "/zones"]);
+export function catalogVersion(categories: readonly string[] = CATEGORIES, zones: readonly { nombre: string; latitud: number; longitud: number }[] = ZONES) {
+  const text = JSON.stringify({ categorias: categories, zonas: zones.map((z) => ({ nombre: z.nombre, latitud: z.latitud, longitud: z.longitud })) });
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return hash.toString(16).padStart(8, "0");
+}
+export const CATALOG_VERSION = catalogVersion();
 export const categorySchema = t.Union(CATEGORIES.map((v) => t.Literal(v)));
 export const locationSchema = t.Object({
   latitud: t.Number({ minimum: -90, maximum: 90 }),

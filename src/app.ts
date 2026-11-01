@@ -4,6 +4,7 @@ import { config } from "./config";
 import { createDatabase, type AppDatabase } from "./database";
 import { otpCodes, sessions } from "./db/schema";
 import { ApiError } from "./errors";
+import { CATALOG_PATHS, CATALOG_VERSION, CATALOG_VERSION_HEADER } from "./types";
 import { sendOtp, type OtpSender } from "./mailer";
 import { authRoutes } from "./routes/auth";
 import { encounterRoutes } from "./routes/encounters";
@@ -26,6 +27,7 @@ export function createApp(db: AppDatabase = createDatabase(), options: { sendOtp
         "access-control-allow-origin": "*",
         "access-control-allow-headers": "authorization, content-type",
         "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
+        "access-control-expose-headers": CATALOG_VERSION_HEADER,
         "access-control-max-age": "600",
         "x-content-type-options": "nosniff",
       });
@@ -37,6 +39,9 @@ export function createApp(db: AppDatabase = createDatabase(), options: { sendOtp
       if (code === "NOT_FOUND") return status(404, { error: { code: "ROUTE_NOT_FOUND", message: "Ruta no encontrada" } });
       console.error("Error interno de la API:", error instanceof Error ? error.message : "Error desconocido");
       return status(500, { error: { code: "INTERNAL_ERROR", message: "Error interno del servidor" } });
+    })
+    .onAfterHandle(({ path, set }) => {
+      if (CATALOG_PATHS.has(path)) set.headers[CATALOG_VERSION_HEADER] = CATALOG_VERSION;
     })
     .as("global")
     .options("/*", ({ status }) => status(204))
