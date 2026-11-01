@@ -238,5 +238,41 @@ Las dos partes pueden valorar a su contraparte una única vez tras resolver. Se 
 - `POST /alertas/:id/leida`.
 - `GET /notificaciones`: paginadas; agrega `sinLeer` total.
 - `POST /notificaciones/:id/leida` y `POST /notificaciones/leidas`.
+- `GET /notificaciones/resumen` y `POST /notificaciones/grupo/leida`: contadores sin leer y lectura por grupo, descritos abajo.
+
+### Resumen de no leídas
+
+`GET /notificaciones/resumen` (con sesión) es lo que consulta `useNovedades` en cada ciclo, en lugar de recorrer `GET /notificaciones`. No trae mensajes ni filas: solo contadores de lo que está sin leer.
+
+```json
+{
+  "sinLeer": 13,
+  "corte": "412@2026-03-01T00:03:20.000Z",
+  "alertas": [{ "alertaId": "a-1", "sinLeer": 2 }],
+  "publicaciones": [{ "publicacionId": "p-1", "sinLeer": 2 }],
+  "reclamos": [{ "reclamoId": "c-1", "sinLeer": 3 }]
+}
+```
+
+- `sinLeer`: todas las sin leer de la cuenta, de cualquier tipo (el mismo valor que `sinLeer` de `GET /notificaciones`).
+- `alertas`: avisos de tipo `coincidencia` por alerta, contando publicaciones distintas (la misma publicación avisada dos veces cuenta una).
+- `publicaciones`: avisos de tipo `publicacion` (novedades de seguidas) por publicación, uno cada aviso.
+- `reclamos`: avisos de tipo `mensaje` por reclamo, uno cada mensaje. Los demás tipos (`reclamo`, `devolucion`, `valoracion`) solo suman a `sinLeer`.
+- Listas ordenadas por id y vacías si no hay pendientes; solo figuran las entidades con pendientes. El tamaño de la respuesta y el trabajo del servidor son proporcionales a esas entidades, no al historial leído (usa el índice parcial de no leídas `hallado_notificacion_sinleer_idx`).
+- Antes de contar reconcilia los vencimientos de lo que la persona sigue, igual que `GET /notificaciones`: el aviso «Venció» aparece en el resumen aunque nadie pida el listado, las seguidas ni el detalle.
+- `corte` es opaco (`null` si no hay pendientes): marca hasta dónde llegó lo que se muestra.
+
+`POST /notificaciones/grupo/leida` marca como leído un grupo con una sola escritura.
+
+```json
+{ "tipo": "alerta", "id": "a-1", "corte": "412@2026-03-01T00:03:20.000Z" }
+```
+
+- `tipo`: `alerta` (avisos `coincidencia` de esa alerta), `publicacion` (avisos `publicacion` de esa publicación) o `reclamo` (avisos `mensaje` de ese reclamo). Otro valor, un `id` vacío o falta de campos: 422 `VALIDATION_ERROR`.
+- `corte`: el que devolvió el último resumen. Solo se marcan las sin leer del grupo con alta hasta ese corte, de modo que un aviso llegado después de lo mostrado sigue sin leer. Un corte con otro formato: 422 `INVALID_CUTOFF`.
+- Pertenencia: la alerta debe ser de quien llama (404 `ALERT_NOT_FOUND`); en un reclamo, quien reclamó o quien publicó (404 `CLAIM_NOT_FOUND`); la publicación debe existir (404 `PUBLICATION_NOT_FOUND`). Siempre se marcan solo notificaciones de la cuenta autenticada.
+- Respuesta 200: `{ "message", "marcadas", "resumen" }`, con `resumen` ya reconciliado con la forma de `GET /notificaciones/resumen` (incluye avisos nuevos que no se marcaron). Repetir la llamada es idempotente (`marcadas: 0`).
+
+Los endpoints anteriores (`GET /notificaciones` paginado, `POST /notificaciones/:id/leida`, `POST /notificaciones/leidas` y `POST /alertas/:id/leida`) siguen igual.
 
 Una publicación nueva o editada que coincide con una alerta activa genera una notificación, excepto si es del mismo usuario. No se repite la misma coincidencia alerta/publicación. Al reactivar se revisan publicaciones creadas o actualizadas desde que se guardó la alerta. Al guardar una alerta no se notifican todas las coincidencias previas. Las notificaciones también incluyen novedades de seguidas, reclamos, devoluciones, mensajes y valoraciones. Se guardan en SQLite y se consultan desde la app; no se envían por email ni push.
