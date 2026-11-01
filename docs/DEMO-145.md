@@ -40,7 +40,7 @@ El reenvío se habilita después de 30 segundos. Usar siempre el código más re
 
 | Uso | Email | Contraseña inicial |
 | --- | --- | --- |
-| Dispositivo A: Sofía, quien consulta y publica en vivo | `demo@hallado.com` | `Hallado123` |
+| Dispositivo A: Sofía, quien consulta y publica en vivo | `sofia@hallado.com` | `Hallado123` |
 | Dispositivo B: Lucía, autora de las llaves y la mochila | `lucia@hallado.com` | `Hallado123` |
 | Contraparte precargada de los auriculares | `martin@hallado.com` | `Hallado123` |
 
@@ -105,7 +105,7 @@ Lucía tiene además cinco casos resueltos con reclamos aceptados y valoraciones
 2. Completar la autenticación que solicite Android. Salir de la app a Inicio y volver.
 3. Mostrar el bloqueo de la sesión y desbloquear con la huella preparada.
 4. Volver a Configuración y desactivar el interruptor. Volver a salir y entrar para mostrar que ya no pide biometría.
-5. Cerrar sesión y entrar como `demo@hallado.com` / `Hallado123` (Sofía). En B, Lucía usa `lucia@hallado.com` / `Hallado123`.
+5. Cerrar sesión y entrar como `sofia@hallado.com` / `Hallado123` (Sofía). En B, Lucía usa `lucia@hallado.com` / `Hallado123`.
 
 **Decir:**
 

@@ -11,7 +11,7 @@ const assetsPath = fileURLToPath(new URL("../../assets/demo/", import.meta.url))
 const DAY = 86_400_000;
 export const DEMO_PASSWORD = "Hallado123";
 export const DEMO_PEOPLE = [
-  { id: "demo-usuario", email: "demo@hallado.com", name: "Sofía Torres", zone: "Palermo", phone: "11 5555-0100", sharePhone: true },
+  { id: "demo-usuario", email: "sofia@hallado.com", name: "Sofía Torres", zone: "Palermo", phone: "11 5555-0100", sharePhone: true },
   { id: "demo-lucia", email: "lucia@hallado.com", name: "Lucía Fernández", zone: "Palermo", phone: "11 5555-0101", sharePhone: true },
   { id: "demo-martin", email: "martin@hallado.com", name: "Martín Gómez", zone: "Belgrano", phone: "11 5555-0102", sharePhone: false },
 ] as const;
@@ -30,9 +30,13 @@ export async function seedDemo(db: AppDatabase, options: { uploadsPath: string; 
   const now = options.now ?? new Date(), iso = now.toISOString();
   const ago = (days: number) => new Date(now.getTime() - days * DAY);
   const hash = await Bun.password.hash(DEMO_PASSWORD);
-  const people = DEMO_PEOPLE.map((p) => ({ ...p,
-    id: db.select({ id: users.id }).from(users).where(eq(users.email, p.email)).get()?.id ?? p.id,
-  }));
+  const people = DEMO_PEOPLE.map((p) => {
+    const existing = db.select({ id: users.id }).from(users).where(eq(users.email, p.email)).get()
+      ?? (p.id === "demo-usuario"
+        ? db.select({ id: users.id }).from(users).where(eq(users.email, "demo@hallado.com")).get()
+        : undefined);
+    return { ...p, id: existing?.id ?? p.id };
+  });
   const images = new Map<string, { filename: string; owner: number; asset: Photo }>();
   function photos(owner: number, names: Photo[]) {
     return names.map((asset) => {
@@ -83,6 +87,9 @@ export async function seedDemo(db: AppDatabase, options: { uploadsPath: string; 
     if (!await Bun.file(target).exists()) await copyFile(join(assetsPath, `${image.asset}.png`), target);
   }
   db.transaction((tx) => {
+    // Conservar ID, contraseña y publicaciones de las tomas que usaban el email anterior.
+    tx.update(users).set({ email: DEMO_PEOPLE[0].email })
+      .where(eq(users.id, people[0]!.id)).run();
     for (const [i, person] of people.entries()) tx.insert(users).values({ ...person, passwordHash: hash,
       createdAt: ago(i === 1 ? 180 : 60).toISOString(), emailVerifiedAt: ago(60).toISOString(),
     }).onConflictDoNothing().run();

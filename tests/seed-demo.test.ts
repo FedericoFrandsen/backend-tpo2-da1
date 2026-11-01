@@ -111,7 +111,8 @@ describe("seed de la demo de puntos 1, 4 y 5", () => {
 
   test("repetir el seed conserva la contraseña cambiada, la renovación y los datos ajenos", async () => {
     const newHash = await Bun.password.hash("OtraClave123");
-    db.update(users).set({ passwordHash: newHash }).where(eq(users.id, DEMO_PEOPLE[0].id)).run();
+    db.update(users).set({ passwordHash: newHash, email: "demo@hallado.com" })
+      .where(eq(users.id, DEMO_PEOPLE[0].id)).run();
     db.insert(users).values({ id: "persona-ajena", email: "ajena@example.com", name: "Cuenta ajena",
       passwordHash: newHash, createdAt: new Date().toISOString(), emailVerifiedAt: new Date().toISOString(),
     }).run();
@@ -125,6 +126,8 @@ describe("seed de la demo de puntos 1, 4 y 5", () => {
     expect(db.select().from(uploads).all()).toEqual(before.uploads);
     expect((await api(`/publicaciones/${DEMO_POSTS.vencida}`, "GET", undefined, tokens[0])).data.venceAt).toBe(renewed.venceAt);
     expect(db.select().from(users).where(eq(users.id, "persona-ajena")).get()).toBeDefined();
+    expect(db.select().from(users).where(eq(users.email, "demo@hallado.com")).get()).toBeUndefined();
+    expect(db.select().from(users).all()).toHaveLength(4);
     expect((await api("/auth/login/password", "POST", { email: DEMO_PEOPLE[0].email, password: "OtraClave123" })).response.status).toBe(200);
     expect((await api("/auth/login/password", "POST", { email: DEMO_PEOPLE[0].email, password: DEMO_PASSWORD })).response.status).toBe(401);
   });

@@ -26,7 +26,7 @@ try {
   await writeFile(current, take, "utf8");
   console.log(`Demo 1, 4 y 5. Toma: ${take}`);
   console.log(`Base: ${config.databasePath}`);
-  console.log("Usuarios: demo@hallado.com (Sofía), lucia@hallado.com, martin@hallado.com");
+  console.log("Usuarios: sofia@hallado.com (Sofía), lucia@hallado.com, martin@hallado.com");
   console.log("Contraseña inicial: Hallado123. Guion: docs/DEMO-145.md");
   if (Bun.argv.includes("--prepare-only")) {
     db.$client.close();

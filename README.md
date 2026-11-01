@@ -64,7 +64,7 @@ Se crean al ejecutar `bun run db:seed`, exclusivamente fuera de producción:
 
 | Email | Contraseña para cuentas nuevas |
 | --- | --- |
-| demo@hallado.com | Hallado123 |
+| sofia@hallado.com | Hallado123 |
 | lucia@hallado.com | Hallado123 |
 | martin@hallado.com | Hallado123 |
 
@@ -166,7 +166,7 @@ bun run start
 Con el seed cargado y el servidor abierto:
 
 ```powershell
-$login = Invoke-RestMethod -Method Post -Uri "http://localhost:3000/auth/login/password" -ContentType "application/json" -Body '{"email":"demo@hallado.com","password":"Hallado123"}'
+$login = Invoke-RestMethod -Method Post -Uri "http://localhost:3000/auth/login/password" -ContentType "application/json" -Body '{"email":"sofia@hallado.com","password":"Hallado123"}'
 $halladoHeaders = @{ Authorization = "Bearer $($login.session.token)" }
 Invoke-RestMethod -Uri "http://localhost:3000/me" -Headers $halladoHeaders
 ```
