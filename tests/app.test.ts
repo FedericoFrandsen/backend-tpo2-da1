@@ -387,7 +387,7 @@ describe("Hallado", () => {
   test("migración sobre TP1 conserva usuarios y añade consentimiento de teléfono", () => {
     const folder = join(temp, "old-migrations");
     for (const name of readdirSync(new URL("../drizzle", import.meta.url))) {
-      if (name.startsWith("2026") && !name.startsWith("202610")) cpSync(new URL(`../drizzle/${name}`, import.meta.url), join(folder, name), { recursive: true });
+      if (name.startsWith("2026") && name < "202610") cpSync(new URL(`../drizzle/${name}`, import.meta.url), join(folder, name), { recursive: true });
     }
     const path = join(temp, "legacy.sqlite");
     const raw = new Database(path, { create: true });
