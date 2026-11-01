@@ -2136,3 +2136,204 @@ describe("alertas geográficas: coherencia entre búsqueda y alerta", () => {
     expect(Math.max(...reads)).toBeLessThanOrEqual(2);
   });
 });
+
+describe("resumen de notificaciones sin leer y lectura por grupo", () => {
+  const DAY = 86_400_000;
+  const get = (path: string, account: number) => api(path, "GET", undefined, accounts[account]!.token);
+  const post = (path: string, account: number, body?: unknown) => api(path, "POST", body, accounts[account]!.token);
+  const uid = (n: number) => accounts[n]!.id;
+  const at = (n: number) => new Date(Date.UTC(2026, 2, 1) + n * 1000).toISOString();
+  const resumen = async (account: number) => (await get("/notificaciones/resumen", account)).data;
+  const leerGrupo = (account: number, tipo: string, id: string, corte: string) => post("/notificaciones/grupo/leida", account, { tipo, id, corte });
+  const FILTROS = { situacion: "perdi", categoria: "Llaves", palabras: "", zona: "Palermo", periodo: "semana", ubicacion: null } as const;
+
+  function insertPost(id: string, extra: Partial<typeof posts.$inferInsert> = {}) {
+    db.insert(posts).values({ id, userId: uid(1), tipo: "encontrado", titulo: `Publicación ${id}`, descripcion: "Descripción de la publicación de prueba.",
+      categoria: "Llaves", barrio: "Palermo", fecha: localDate(), franja: "tarde", latitud: -34.5889, longitud: -58.4306,
+      direccionExacta: "Calle privada 123", fotos: [], createdAt: at(0), updatedAt: at(0), ...extra }).run();
+  }
+  function insertAlert(id: string, userId: string) {
+    db.insert(alerts).values({ id, userId, clave: id, createdAt: at(0), filtros: { ...FILTROS } }).run();
+  }
+  function insertClaim(id: string, publicationId: string, userId: string) {
+    db.insert(claims).values({ id, publicationId, userId, mensaje: "Son mis llaves.", estado: "pendiente", createdAt: at(0), updatedAt: at(0) }).run();
+  }
+  let n = 0;
+  beforeEach(() => { n = 0; });
+  /** Inserta una notificación en el orden de llegada; `read` la deja leída. */
+  function aviso(userId: string, tipo: string, data: { publicationId?: string; claimId?: string; alertId?: string; read?: boolean; createdAt?: string } = {}) {
+    const { read, createdAt, ...ids } = data;
+    const id = `r-${String(n++).padStart(4, "0")}`;
+    db.insert(notifications).values({ id, userId, tipo, mensaje: `Aviso ${id}`, ...ids, readAt: read ? at(9000) : null, createdAt: createdAt ?? at(100 + n) }).run();
+    return id;
+  }
+  function fixture() {
+    for (const p of ["p-1", "p-2", "p-3"]) insertPost(p);
+    insertAlert("a-1", uid(2)); insertAlert("a-2", uid(2)); insertAlert("a-ajena", uid(0));
+    insertClaim("c-1", "p-1", uid(2)); insertClaim("c-2", "p-2", uid(2));
+    const me = uid(2);
+    // Alerta a-1: p-1 dos veces (cuenta una), p-2 una, y p-3 ya leída.
+    aviso(me, "coincidencia", { alertId: "a-1", publicationId: "p-1" });
+    aviso(me, "coincidencia", { alertId: "a-1", publicationId: "p-1" });
+    aviso(me, "coincidencia", { alertId: "a-1", publicationId: "p-2" });
+    aviso(me, "coincidencia", { alertId: "a-1", publicationId: "p-3", read: true });
+    aviso(me, "coincidencia", { alertId: "a-2", publicationId: "p-1" });
+    // Publicaciones seguidas: cuenta cada aviso.
+    aviso(me, "publicacion", { publicationId: "p-1" }); aviso(me, "publicacion", { publicationId: "p-1" });
+    aviso(me, "publicacion", { publicationId: "p-1", read: true }); aviso(me, "publicacion", { publicationId: "p-2" });
+    // Mensajes por reclamo.
+    for (let i = 0; i < 3; i++) aviso(me, "mensaje", { claimId: "c-1", publicationId: "p-1" });
+    aviso(me, "mensaje", { claimId: "c-2", publicationId: "p-2" });
+    // Otros tipos suman al total sin grupo propio.
+    aviso(me, "reclamo", { claimId: "c-1", publicationId: "p-1" }); aviso(me, "valoracion", { publicationId: "p-1" });
+    // La cuenta ajena usa las mismas entidades y no se mezcla.
+    aviso(uid(0), "coincidencia", { alertId: "a-ajena", publicationId: "p-1" });
+    aviso(uid(0), "publicacion", { publicationId: "p-1" }); aviso(uid(0), "mensaje", { claimId: "c-1", publicationId: "p-1" });
+  }
+
+  test("GET /notificaciones/resumen: cuenta sin leer por alerta (publicaciones distintas), publicación y reclamo", async () => {
+    expect((await api("/notificaciones/resumen")).response.status).toBe(401);
+    expect(await resumen(2)).toEqual({ sinLeer: 0, corte: null, alertas: [], publicaciones: [], reclamos: [] });
+    fixture();
+    const r = await resumen(2);
+    expect(Object.keys(r)).toEqual(["sinLeer", "corte", "alertas", "publicaciones", "reclamos"]);
+    expect(r.alertas).toEqual([{ alertaId: "a-1", sinLeer: 2 }, { alertaId: "a-2", sinLeer: 1 }]);
+    expect(r.publicaciones).toEqual([{ publicacionId: "p-1", sinLeer: 2 }, { publicacionId: "p-2", sinLeer: 1 }]);
+    expect(r.reclamos).toEqual([{ reclamoId: "c-1", sinLeer: 3 }, { reclamoId: "c-2", sinLeer: 1 }]);
+    // Total de la cuenta: igual al sinLeer del listado paginado, que cuenta todos los tipos.
+    expect(r.sinLeer).toBe(13);
+    expect(r.sinLeer).toBe((await get("/notificaciones?pageSize=1", 2)).data.sinLeer);
+    expect(typeof r.corte).toBe("string");
+    expect(await resumen(0)).toMatchObject({ sinLeer: 3, alertas: [{ alertaId: "a-ajena", sinLeer: 1 }], publicaciones: [{ publicacionId: "p-1", sinLeer: 1 }], reclamos: [{ reclamoId: "c-1", sinLeer: 1 }] });
+    expect(await resumen(1)).toEqual({ sinLeer: 0, corte: null, alertas: [], publicaciones: [], reclamos: [] });
+  });
+
+  test("un historial grande ya leído no agrega nada al resumen ni se recorre", async () => {
+    fixture();
+    const before = await resumen(2);
+    for (let i = 0; i < 400; i++) aviso(uid(2), i % 2 ? "publicacion" : "mensaje", { publicationId: "p-3", claimId: i % 2 ? undefined : "c-1", read: true, createdAt: at(i) });
+    const after = await resumen(2);
+    expect(after).toEqual(before);
+    expect(JSON.stringify(after).length).toBe(JSON.stringify(before).length);
+
+    const statements: { sql: string; params: unknown[] }[] = [];
+    const original = db.$client.query.bind(db.$client);
+    (db.$client as any).query = (text: string) => {
+      const statement: any = original(text);
+      return new Proxy(statement, { get(target, prop) {
+        const value = target[prop];
+        if (typeof value !== "function") return value;
+        if (prop === "all" || prop === "get" || prop === "run" || prop === "values") return (...args: unknown[]) => { statements.push({ sql: text, params: args }); return value.apply(target, args); };
+        return value.bind(target);
+      } });
+    };
+    try { expect((await get("/notificaciones/resumen", 2)).response.status).toBe(200); } finally { (db.$client as any).query = original; }
+    const mine = statements.filter((s) => /hallado_notifications/.test(s.sql) && /^\s*select/i.test(s.sql));
+    expect(mine.length).toBeGreaterThan(0);
+    const plan = mine.flatMap((s) => (db.$client.query("EXPLAIN QUERY PLAN " + s.sql).all(...(s.params as any[])) as { detail: string }[]).map((r) => r.detail)).join("; ");
+    // Las consultas del resumen salen del índice de no leídas del usuario: ni el historial del usuario ni la tabla.
+    expect(plan).toContain("hallado_notificacion_sinleer_idx");
+    expect(plan).not.toContain("hallado_notificacion_usuario_idx");
+    expect(plan).not.toMatch(/SCAN hallado_notifications/);
+    // Ninguna consulta del resumen trae textos: devuelven agregados de entidades con pendientes.
+    expect(mine.every((s) => !/"mensaje"/.test(s.sql))).toBe(true);
+  });
+
+  test("el resumen reconcilia los vencimientos de lo seguido sin pasar antes por otro endpoint", async () => {
+    insertPost("vence");
+    db.insert(follows).values({ userId: uid(2), publicationId: "vence", createdAt: at(0) }).run();
+    expect((await resumen(2)).sinLeer).toBe(0);
+    db.update(posts).set({ venceAt: new Date(Date.now() - DAY).toISOString() }).where(eq(posts.id, "vence")).run();
+    // No se llamó a /notificaciones, /me/seguidas ni al detalle: el aviso aparece por el resumen.
+    const r = await resumen(2);
+    expect(r.sinLeer).toBe(1);
+    expect(r.publicaciones).toEqual([{ publicacionId: "vence", sinLeer: 1 }]);
+    expect(db.select().from(notifications).where(eq(notifications.userId, uid(2))).all()).toHaveLength(1);
+    // Repetir el resumen no duplica el aviso.
+    expect(await resumen(2)).toEqual(r);
+  });
+
+  test("POST /notificaciones/grupo/leida: marca solo el grupo pedido, devuelve el resumen y no toca otras cuentas", async () => {
+    fixture();
+    const r = await resumen(2);
+    const ok = await leerGrupo(2, "publicacion", "p-1", r.corte);
+    expect(ok.response.status).toBe(200);
+    expect(ok.data.marcadas).toBe(2);
+    // Solo las de tipo «publicacion» de esa publicación: coincidencias, mensajes y otros tipos de p-1 siguen sin leer.
+    expect(ok.data.resumen.publicaciones).toEqual([{ publicacionId: "p-2", sinLeer: 1 }]);
+    expect(ok.data.resumen.alertas).toEqual(r.alertas);
+    expect(ok.data.resumen.reclamos).toEqual(r.reclamos);
+    expect(ok.data.resumen.sinLeer).toBe(r.sinLeer - 2);
+    expect(ok.data.resumen).toEqual(await resumen(2));
+    expect(await resumen(0)).toMatchObject({ sinLeer: 3, publicaciones: [{ publicacionId: "p-1", sinLeer: 1 }] });
+    // Repetir es idempotente.
+    expect((await leerGrupo(2, "publicacion", "p-1", r.corte)).data.marcadas).toBe(0);
+    // Alerta (marca todas las filas del grupo, no las distintas) y reclamo.
+    expect((await leerGrupo(2, "alerta", "a-1", r.corte)).data.marcadas).toBe(3);
+    expect((await leerGrupo(2, "reclamo", "c-1", r.corte)).data.marcadas).toBe(3);
+    const last = await resumen(2);
+    expect(last.alertas).toEqual([{ alertaId: "a-2", sinLeer: 1 }]);
+    expect(last.reclamos).toEqual([{ reclamoId: "c-2", sinLeer: 1 }]);
+    expect(last.publicaciones).toEqual([{ publicacionId: "p-2", sinLeer: 1 }]);
+    // Los demás tipos no tienen grupo y se conservan hasta «marcar todo».
+    expect(last.sinLeer).toBe(13 - 2 - 3 - 3);
+  });
+
+  test("la lectura por grupo valida sesión, cuerpo, tipo y pertenencia", async () => {
+    fixture();
+    const { corte } = await resumen(2);
+    expect((await api("/notificaciones/grupo/leida", "POST", { tipo: "alerta", id: "a-1", corte })).response.status).toBe(401);
+    for (const body of [{}, { tipo: "alerta", id: "a-1" }, { tipo: "alerta", corte }, { tipo: "otra", id: "a-1", corte }, { tipo: "mensaje", id: "c-1", corte }, { tipo: "alerta", id: "", corte }]) {
+      const r = await post("/notificaciones/grupo/leida", 2, body);
+      expect([JSON.stringify(body), r.response.status, r.data.error.code]).toEqual([JSON.stringify(body), 422, "VALIDATION_ERROR"]);
+    }
+    for (const bad of ["x", "0", "12", "12@ayer", "-1@2026-03-01T00:00:00.000Z", "1@2026-03-01T00:00:00.000Z; DROP"]) {
+      const r = await leerGrupo(2, "alerta", "a-1", bad);
+      expect([bad, r.response.status, r.data.error.code]).toEqual([bad, 422, "INVALID_CUTOFF"]);
+    }
+    // Entidades ajenas o inexistentes: 404 sin marcar nada de nadie.
+    expect(await leerGrupo(2, "alerta", "a-ajena", corte)).toMatchObject({ response: { status: 404 }, data: { error: { code: "ALERT_NOT_FOUND" } } });
+    expect(await leerGrupo(0, "reclamo", "c-1", corte)).toMatchObject({ response: { status: 404 }, data: { error: { code: "CLAIM_NOT_FOUND" } } });
+    expect(await leerGrupo(2, "reclamo", "no-existe", corte)).toMatchObject({ response: { status: 404 } });
+    expect(await leerGrupo(2, "publicacion", "no-existe", corte)).toMatchObject({ response: { status: 404 }, data: { error: { code: "PUBLICATION_NOT_FOUND" } } });
+    expect(await leerGrupo(0, "alerta", "a-1", corte)).toMatchObject({ response: { status: 404 } });
+    expect((await resumen(0)).sinLeer).toBe(3);
+    expect((await resumen(2)).sinLeer).toBe(13);
+    // La persona que publicó también participa del reclamo.
+    expect((await leerGrupo(1, "reclamo", "c-1", corte)).response.status).toBe(200);
+    expect((await resumen(2)).sinLeer).toBe(13);
+  });
+
+  test("lo que llega después del resumen mostrado no se marca como leído", async () => {
+    fixture();
+    const shown = await resumen(2);
+    // Llegan eventos de los tres grupos después de haber mostrado el resumen.
+    aviso(uid(2), "publicacion", { publicationId: "p-1" });
+    aviso(uid(2), "coincidencia", { alertId: "a-1", publicationId: "p-3" });
+    aviso(uid(2), "mensaje", { claimId: "c-1", publicationId: "p-1" });
+    for (const [tipo, id] of [["publicacion", "p-1"], ["alerta", "a-1"], ["reclamo", "c-1"]] as const) {
+      expect((await leerGrupo(2, tipo, id, shown.corte)).response.status).toBe(200);
+    }
+    const after = await resumen(2);
+    expect(after.publicaciones).toEqual([{ publicacionId: "p-1", sinLeer: 1 }, { publicacionId: "p-2", sinLeer: 1 }]);
+    expect(after.alertas).toEqual([{ alertaId: "a-1", sinLeer: 1 }, { alertaId: "a-2", sinLeer: 1 }]);
+    expect(after.reclamos).toEqual([{ reclamoId: "c-1", sinLeer: 1 }, { reclamoId: "c-2", sinLeer: 1 }]);
+    // Con el corte nuevo sí se marcan.
+    expect((await leerGrupo(2, "publicacion", "p-1", after.corte)).data.marcadas).toBe(1);
+    expect((await resumen(0)).sinLeer).toBe(3);
+  });
+
+  test("un corte viejo no marca un evento nuevo aunque reutilice el rowid de uno borrado", async () => {
+    insertPost("p-1"); insertAlert("a-1", uid(2));
+    aviso(uid(2), "publicacion", { publicationId: "p-1", createdAt: at(1) });
+    aviso(uid(2), "coincidencia", { alertId: "a-1", publicationId: "p-1", createdAt: at(2) });
+    const shown = await resumen(2);
+    // Borrar la alerta elimina su notificación, la de rowid más alto: el siguiente alta reutiliza ese rowid.
+    expect((await api("/alertas/a-1", "DELETE", undefined, accounts[2]!.token)).response.status).toBe(200);
+    const nuevo = aviso(uid(2), "publicacion", { publicationId: "p-1", createdAt: at(3) });
+    const rowid = (id: string) => (db.$client.query("SELECT rowid AS r FROM hallado_notifications WHERE id = ?").get(id) as { r: number }).r;
+    expect(rowid(nuevo)).toBe(Number(shown.corte.split("@")[0]));
+    expect((await leerGrupo(2, "publicacion", "p-1", shown.corte)).data.marcadas).toBe(1);
+    expect((await resumen(2)).publicaciones).toEqual([{ publicacionId: "p-1", sinLeer: 1 }]);
+  });
+});
