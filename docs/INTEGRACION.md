@@ -24,7 +24,7 @@ Cada grupo está asociado al servicio del frontend (`services/*.js` en el reposi
 Notas de uso:
 
 - La app toma la base de la API de `EXPO_PUBLIC_API_URL` (ver el README del frontend). Sin esa variable usa `http://10.0.2.2:3000`.
-- La app no llama a `GET /barrios`: sus zonas vienen de la constante `ZONAS` del frontend (`data/searchDemo.js`). Esa lista tiene que coincidir con la del backend, porque el reclamo «Lo encontré» valida el barrio contra `GET /barrios`.
+- Los formularios de búsqueda y de publicación leen `GET /categorias` y `GET /barrios` (`services/catalogos.js`), con la última copia válida y la constante `ZONAS` del frontend (`data/searchDemo.js`) como respaldo sin conexión. El selector de barrio del reclamo «Lo encontré» todavía usa `ZONAS` directamente, así que esa lista tiene que seguir coincidiendo con la del backend, que valida el barrio contra `GET /barrios`.
 - La app no llama a `/me/busquedas`: las búsquedas recientes se guardan en el dispositivo.
 
 ## Cliente HTTP
@@ -98,6 +98,7 @@ El perfil privado agrega email, username, phone, sharePhone y hasPassword. `shar
 - `GET /categorias`: array de strings.
 - `GET /barrios`: array de `{ nombre, latitud, longitud }`.
 - Compatibilidad: `/categories` y `/zones`.
+- Los cuatro endpoints de catálogo envían la cabecera `x-catalogo-version`, una huella del contenido que cambia sola cuando cambia la lista. El cuerpo de la respuesta no cambia.
 - `GET /publicaciones` requiere filtros del buscador guiado.
 
 Ejemplo:
