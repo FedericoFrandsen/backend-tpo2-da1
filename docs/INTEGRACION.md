@@ -96,7 +96,7 @@ El perfil privado agrega email, username, phone, sharePhone y hasPassword. `shar
 ## Buscador y resultados
 
 - `GET /categorias`: array de strings.
-- `GET /barrios`: array de `{ nombre, latitud, longitud }`.
+- `GET /barrios`: array de `{ nombre, latitud, longitud }`. Son 91 entradas: "Centro" (que no es un barrio oficial), los 48 barrios de CABA y unas 40 localidades del GBA, con el centro aproximado de cada una. Los seis primeros (Centro, Palermo, Recoleta, Belgrano, Caballito, Almagro) conservan nombre, coordenadas y orden; no hay dos nombres iguales al ignorar tildes y mayúsculas.
 - Compatibilidad: `/categories` y `/zones`.
 - Los cuatro endpoints de catálogo envían la cabecera `x-catalogo-version`, una huella del contenido que cambia sola cuando cambia la lista. El cuerpo de la respuesta no cambia.
 - `GET /publicaciones` requiere filtros del buscador guiado.

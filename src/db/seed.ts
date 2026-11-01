@@ -27,7 +27,7 @@ try {
     }
     const titles = ["Documento en un sobre azul", "Llaves con llavero rojo", "Auriculares negros", "Perro con collar azul", "Campera negra", "Mochila azul"];
     for (const [ci, categoria] of CATEGORIES.entries()) {
-      for (const [zi, z] of ZONES.entries()) {
+      for (const [zi, z] of ZONES.slice(0, 6).entries()) {
         for (const tipo of ["encontrado", "perdido"] as const) {
           for (let day = 0; day < 3; day++) {
             const date = new Date(`${localDate()}T12:00:00Z`);

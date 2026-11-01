@@ -66,7 +66,7 @@ Se crean al ejecutar `bun run db:seed`, exclusivamente fuera de producción:
 | lucia@hallado.com | Hallado123 |
 | martin@hallado.com | Hallado123 |
 
-Hay 216 publicaciones abiertas (las seis categorías y barrios), devoluciones concretadas, reputación, insignia y un reclamo pendiente. El seed usa fechas relativas al día en que se ejecuta. Si volvés a ejecutarlo otro día, las publicaciones ya existentes conservan sus fechas; creá nuevas publicaciones para probar alertas nuevas.
+Hay 216 publicaciones abiertas (las seis categorías y los seis primeros barrios del catálogo), devoluciones concretadas, reputación, insignia y un reclamo pendiente. El seed usa fechas relativas al día en que se ejecuta. Si volvés a ejecutarlo otro día, las publicaciones ya existentes conservan sus fechas; creá nuevas publicaciones para probar alertas nuevas.
 
 Si una cuenta demo ya existía, se conserva su contraseña anterior. Las fotos de los ejemplos están vacías para que puedas probar la subida real desde la app. Para probar varios roles, usá cuentas diferentes.
 

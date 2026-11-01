@@ -2560,10 +2560,18 @@ describe("Catálogo de categorías y barrios", () => {
     expect(categorias.data).toEqual(["Documentos", "Llaves", "Electrónica", "Mascotas", "Ropa", "Otros"]);
     expect(categories.data).toEqual(categorias.data);
     expect(zones.data).toEqual(barrios.data);
-    expect(barrios.data.map((z: any) => z.nombre)).toEqual(["Centro", "Palermo", "Recoleta", "Belgrano", "Caballito", "Almagro"]);
+    // Los seis históricos van primero y no se reordenan: publicaciones, alertas y el seed guardan esos nombres.
+    expect(barrios.data.slice(0, 6).map((z: any) => z.nombre)).toEqual(["Centro", "Palermo", "Recoleta", "Belgrano", "Caballito", "Almagro"]);
+    expect(barrios.data[1]).toEqual({ nombre: "Palermo", latitud: -34.5889, longitud: -58.4306 });
+    expect(barrios.data).toHaveLength(91);
+    const nombres = barrios.data.map((z: any) => z.nombre);
+    for (const esperado of ["Villa Urquiza", "Núñez", "Puerto Madero", "Vicente López", "San Isidro", "Lomas de Zamora", "La Plata"]) expect(nombres).toContain(esperado);
     for (const z of barrios.data) {
       expect(Object.keys(z).sort()).toEqual(["latitud", "longitud", "nombre"]);
-      expect(Math.abs(z.latitud)).toBeLessThanOrEqual(90); expect(Math.abs(z.longitud)).toBeLessThanOrEqual(180);
+      // Área metropolitana de Buenos Aires (La Plata incluida), con a lo sumo 4 decimales.
+      expect(z.latitud).toBeGreaterThan(-35.1); expect(z.latitud).toBeLessThan(-34.2);
+      expect(z.longitud).toBeGreaterThan(-59.1); expect(z.longitud).toBeLessThan(-57.8);
+      expect(Math.round(z.latitud * 1e4) / 1e4).toBe(z.latitud); expect(Math.round(z.longitud * 1e4) / 1e4).toBe(z.longitud);
     }
     // Dos barrios homónimos (p. ej. «Núñez» y «Nunez») se fusionarían al buscar por nombre: el catálogo no puede tenerlos.
     expect(new Set(barrios.data.map((z: any) => normalized(z.nombre))).size).toBe(barrios.data.length);
@@ -2577,7 +2585,7 @@ describe("Catálogo de categorías y barrios", () => {
     expect(version).toMatch(/^[0-9a-f]{8}$/);
     // Valor fijo: el cliente calcula la misma huella con el catálogo que trae incluido (hallado, services/catalogos.js).
     // Si cambia a propósito la lista, hay que actualizar este valor y el de la prueba del cliente.
-    expect(version).toBe("fe067df2");
+    expect(version).toBe("3c78e368");
     expect(b.response.headers.get("x-catalogo-version")).toBe(version);
     expect(c.response.headers.get("x-catalogo-version")).toBe(version);
     expect(a.response.headers.get("access-control-expose-headers")).toContain("x-catalogo-version");
