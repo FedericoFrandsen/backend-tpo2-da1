@@ -12,6 +12,9 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run scripts/migrate.ts",
     "db:seed": "bun run src/db/seed.ts",
+    "demo:prepare": "bun run scripts/demo.ts --prepare-only",
+    "demo:reset": "bun run scripts/demo.ts --prepare-only --new-take",
+    "demo": "bun run scripts/demo.ts",
     "db:studio": "drizzle-kit studio",
     "check": "bun run typecheck && bun test"
   },

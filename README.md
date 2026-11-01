@@ -25,6 +25,8 @@ bun run dev
 
 Las migraciones se aplican automáticamente. `db:seed` es opcional, idempotente y no cambia las contraseñas ni los datos existentes. Solo inserta registros de demostración que todavía no existen.
 
+Para grabar los puntos **1, 4 y 5**, usar la demo separada y el [guion de grabación](docs/DEMO-145.md): detener el backend habitual, ejecutar `bun run demo:reset` y después `bun run demo`. Cada nueva toma conserva las anteriores y no modifica la base habitual. `bun run demo:prepare` prepara o verifica la toma actual sin levantar un servidor.
+
 - Salud: http://localhost:3000/health
 - Rutas: http://localhost:3000/docs
 - Android Emulator: http://10.0.2.2:3000
@@ -66,9 +68,11 @@ Se crean al ejecutar `bun run db:seed`, exclusivamente fuera de producción:
 | lucia@hallado.com | Hallado123 |
 | martin@hallado.com | Hallado123 |
 
-Hay 216 publicaciones abiertas (las seis categorías y los seis primeros barrios del catálogo), devoluciones concretadas, reputación, insignia y un reclamo pendiente. El seed usa fechas relativas al día en que se ejecuta. Si volvés a ejecutarlo otro día, las publicaciones ya existentes conservan sus fechas; creá nuevas publicaciones para probar alertas nuevas.
+El seed está orientado a los puntos 1, 4 y 5: crea 11 publicaciones ficticias en Palermo, galerías con ilustraciones locales, un hallazgo y una pérdida de Lucía listos para consultar/reclamar, y publicaciones de Sofía en los cuatro estados (abierta, en reclamo, resuelta y vencida). Lucía tiene cinco devoluciones concretadas, valoraciones y la insignia Vecino solidario. La campera vencida lleva 31 días de antigüedad para demostrar su renovación sin esperar un mes.
 
-Si una cuenta demo ya existía, se conserva su contraseña anterior. Las fotos de los ejemplos están vacías para que puedas probar la subida real desde la app. Para probar varios roles, usá cuentas diferentes.
+Las fotos se copian de `assets/demo` a los uploads configurados y se sirven por las rutas normales de la API, con propietario registrado. No requieren una web externa. La respuesta privada de las llaves es `Nube` y no se ve en las imágenes. El [guion](docs/DEMO-145.md) detalla usuarios, casos, datos para completar y narración.
+
+Si una cuenta demo ya existía, se conserva su contraseña y perfil anterior. Repetir `db:seed` conserva las fechas y los cambios de las publicaciones existentes; tampoco elimina los ejemplos masivos del seed anterior. Para una demo limpia usar `demo:reset`: crea una base nueva bajo `data/demo-145/` y conserva las tomas anteriores. Reiniciar con `demo` reutiliza la toma actual sin revertir lo grabado. La demo respeta la configuración de correo: el modo consola permite ensayar OTP, pero no demuestra entrega real de email. Los borradores y la biometría se preparan en el dispositivo, no en el seed.
 
 ## Funcionalidades
 
@@ -149,6 +153,9 @@ bun run db:migrate
 bun run db:generate
 bun run db:studio
 bun run db:seed
+bun run demo:prepare
+bun run demo:reset
+bun run demo
 bun run start
 ```
 
