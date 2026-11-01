@@ -168,7 +168,7 @@ La app móvil no usa estos endpoints: guarda las búsquedas recientes en el disp
 
 - `POST /publicaciones`: crear; devuelve 201 y el detalle.
 - `PATCH /publicaciones/:id`: enviar solo campos editados. Solo el dueño y mientras está abierta.
-- `DELETE /publicaciones/:id`: eliminación lógica, solo el dueño y si está abierta. Se conserva la trazabilidad; no se puede eliminar una devolución resuelta.
+- `DELETE /publicaciones/:id`: eliminación lógica, solo el dueño y si está abierta. Se conserva la trazabilidad; no se puede eliminar una devolución resuelta. Tras avisar a seguidores y reclamantes, marca como leídas, para todas las personas, las notificaciones de esa publicación de cualquier tipo salvo `coincidencia` (la publicación desaparece de Seguidas y de `/me/reclamos`, así que esos avisos ya no se podrían limpiar). La migración hizo lo mismo con los avisos huérfanos que ya existían.
 - `POST /publicaciones/:id/renovar`: solo el dueño; fija `venceAt` en ahora + 30 días y devuelve el detalle. 409 `PUBLICATION_LOCKED` si está resuelta, 404 si fue eliminada, 403 si no es el dueño.
 - `GET /mis-publicaciones`: propias, paginadas; filtro opcional `estado` (`abierta`, `en_reclamo`, `resuelta`, `vencida`; otro valor da 422).
 - `barrio` es **obligatorio** y debe ser uno de `GET /barrios` (se compara sin tildes ni mayúsculas y se guarda el nombre canónico): 422 `BARRIO_REQUIRED` si falta, 422 `INVALID_BARRIO` si no está en la lista. Ya no existe el valor "Ubicación actual". `ubicacion` es opcional: si viene, se guardan esas coordenadas junto con el barrio (sirven para el orden por cercanía y el radio); si no, se usa el centro del barrio. No se hace geocodificación externa.
@@ -190,7 +190,7 @@ La app móvil no usa estos endpoints: guarda las búsquedas recientes en el disp
 
 - `GET /publicaciones/:id`: público; enviar token para acciones propias y visibilidad de datos.
 - `POST /publicaciones/:id/seguir`: idempotente.
-- `DELETE /publicaciones/:id/seguir`: idempotente.
+- `DELETE /publicaciones/:id/seguir`: idempotente. Además marca como leídos los avisos `publicacion` de esa persona sobre esa publicación, para que no queden contando en Seguidas una fila que ya no aparece.
 - `GET /me/seguidas`: seguidas, paginadas.
 
 El detalle agrega `preguntaVerificacion` (y `respuestaVerificacion` solo para el dueño), `publicador`, `esPropia`, `siguiendo`, `reclamoEnviado`, `reclamoAceptado`, `miReclamo`, `direccionExacta` y la `valoracion` que hizo el usuario actual. `publicador` tiene el formato del perfil público. Su teléfono solo aparece si el reclamo aceptado corresponde al usuario actual y el publicador eligió compartirlo. La dirección exacta es null para cualquier tercero sin ese reclamo aceptado. El propio autor siempre puede consultar la dirección que cargó.

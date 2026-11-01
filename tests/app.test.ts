@@ -3088,3 +3088,85 @@ describe("publicación: barrio, dirección y hora", () => {
     } finally { upgraded.$client.close(); }
   });
 });
+
+describe("contador de Seguidas: avisos que ya no se pueden limpiar", () => {
+  const resumen = async (account: number) => (await api("/notificaciones/resumen", "GET", undefined, accounts[account]!.token)).data;
+  const seguir = (id: string, account: number, method = "POST") => api(`/publicaciones/${id}/seguir`, method, undefined, accounts[account]!.token);
+
+  test("dejar de seguir marca leídos los avisos de esa publicación, solo los de esa persona y de tipo publicación", async () => {
+    const p = await publish(); const otra = await publish({ titulo: "Otras llaves distintas" });
+    for (const id of [p.id, otra.id]) { await seguir(id, 1); await seguir(id, 2); }
+    await api(`/publicaciones/${p.id}`, "PATCH", { titulo: "Llaves actualizadas" }, accounts[0]!.token);
+    await api(`/publicaciones/${otra.id}`, "PATCH", { titulo: "Otras llaves actualizadas" }, accounts[0]!.token);
+    // Un aviso de otro tipo sobre la misma publicación no es de Seguidas y no se toca.
+    db.insert(notifications).values({ id: "val-1", userId: accounts[1]!.id, tipo: "valoracion", mensaje: "Valoración", publicationId: p.id, createdAt: nowIso() }).run();
+    expect((await resumen(1)).publicaciones.map((x: any) => x.publicacionId).sort()).toEqual([p.id, otra.id].sort());
+    expect((await seguir(p.id, 1, "DELETE")).data).toEqual({ siguiendo: false });
+    const despues = await resumen(1);
+    expect(despues.publicaciones).toEqual([{ publicacionId: otra.id, sinLeer: 1 }]);
+    expect(despues.sinLeer).toBe(2); // la otra publicación y la valoración
+    // La otra cuenta sigue con sus dos avisos.
+    expect((await resumen(2)).publicaciones).toHaveLength(2);
+    // Es idempotente.
+    expect((await seguir(p.id, 1, "DELETE")).response.status).toBe(200);
+  });
+
+  test("eliminar una publicación marca leídos sus avisos de todos, salvo las coincidencias de alertas", async () => {
+    const alerta = await api("/alertas", "POST", { filtros: { situacion: "perdi", categoria: "Llaves", palabras: "", zona: "Palermo", periodo: "semana" } }, accounts[2]!.token);
+    expect(alerta.response.status).toBe(201);
+    const p = await publish();
+    await seguir(p.id, 1); await seguir(p.id, 2);
+    await claim(p.id, 1);
+    await api(`/publicaciones/${p.id}`, "PATCH", { titulo: "Llaves actualizadas" }, accounts[0]!.token);
+    expect((await resumen(0)).sinLeer).toBe(1); // el reclamo recibido
+    expect((await resumen(1)).publicaciones).toHaveLength(1);
+    expect((await api(`/publicaciones/${p.id}`, "DELETE", undefined, accounts[0]!.token)).response.status).toBe(200);
+    const limpio = { sinLeer: 0, alertas: [], publicaciones: [], reclamos: [] };
+    expect(await resumen(0)).toMatchObject(limpio);
+    expect(await resumen(1)).toMatchObject(limpio); // seguía la publicación y su reclamo se canceló
+    // La coincidencia de la alerta sigue sin leer: es de la alerta, no de Seguidas.
+    expect(await resumen(2)).toMatchObject({ sinLeer: 1, alertas: [{ alertaId: alerta.data.id, sinLeer: 1 }], publicaciones: [], reclamos: [] });
+    // Los avisos siguen en el listado, ya leídos.
+    const lista = (await api("/notificaciones", "GET", undefined, accounts[1]!.token)).data;
+    expect(lista.sinLeer).toBe(0);
+    expect(lista.items.some((n: any) => n.mensaje.startsWith("Se eliminó"))).toBe(true);
+  });
+
+  test("la migración marca leídos los avisos huérfanos que ya existían", () => {
+    const folder = join(temp, "before-huerfanas");
+    for (const name of readdirSync(new URL("../drizzle", import.meta.url))) {
+      if (name.startsWith("2026") && name < "20261101211602_notificaciones_huerfanas") cpSync(new URL(`../drizzle/${name}`, import.meta.url), join(folder, name), { recursive: true });
+    }
+    const path = join(temp, "before-huerfanas.sqlite");
+    const raw = new Database(path, { create: true });
+    migrate(drizzle({ client: raw }), { migrationsFolder: folder });
+    const at = nowIso();
+    for (const id of ["o", "s"]) raw.run("INSERT INTO users (id,email,name,created_at,email_verified_at) VALUES (?,?,?,?,?)", [id, `${id}@example.com`, id, at, at]);
+    const post = (id: string, deleted: string | null) => raw.run(
+      `INSERT INTO hallado_publications (id,user_id,tipo,titulo,descripcion,categoria,barrio,fecha,franja,latitud,longitud,fotos,estado,created_at,updated_at,deleted_at)
+       VALUES (?,'o','encontrado','Llaves','Llaves encontradas hace tiempo','Llaves','Palermo','2026-10-01','tarde',-34.5,-58.4,'[]','abierta',?,?,?)`, [id, at, at, deleted]);
+    post("viva", null); post("borrada", at);
+    raw.run("INSERT INTO hallado_follows (publication_id,user_id,created_at) VALUES ('viva','s',?)", [at]);
+    raw.run("INSERT INTO hallado_follows (publication_id,user_id,created_at) VALUES ('borrada','s',?)", [at]);
+    raw.run("INSERT INTO hallado_claims (id,publication_id,user_id,mensaje,estado,intentos,created_at,updated_at) VALUES ('c-viva','viva','s','Mío','pendiente',1,?,?)", [at, at]);
+    raw.run("INSERT INTO hallado_claims (id,publication_id,user_id,mensaje,estado,intentos,created_at,updated_at) VALUES ('c-borrada','borrada','s','Mío','pendiente',1,?,?)", [at, at]);
+    const aviso = (id: string, user: string, tipo: string, pub: string | null, claim: string | null = null) => raw.run(
+      "INSERT INTO hallado_notifications (id,user_id,tipo,mensaje,publication_id,claim_id,created_at) VALUES (?,?,?,?,?,?,?)", [id, user, tipo, id, pub, claim, at]);
+    aviso("seguida-viva", "s", "publicacion", "viva");        // sigue: queda sin leer
+    aviso("seguida-borrada", "s", "publicacion", "borrada");  // eliminada: se lee
+    aviso("sin-seguir", "o", "publicacion", "viva");          // el dueño no la sigue: se lee
+    aviso("sin-publicacion", "s", "publicacion", null);       // no hay publicación que revisar: queda
+    aviso("reclamo-borrado", "s", "reclamo", "borrada", "c-borrada"); // reclamo de una eliminada: se lee
+    aviso("mensaje-borrado", "o", "mensaje", "borrada", "c-borrada");
+    aviso("reclamo-vivo", "s", "reclamo", "viva", "c-viva");  // queda
+    aviso("coincidencia-borrada", "s", "coincidencia", "borrada"); // las coincidencias no se tocan
+    raw.close();
+    const upgraded = createDatabase(path);
+    try {
+      const rows = upgraded.select().from(notifications).all();
+      const sinLeer = rows.filter((n) => n.readAt === null).map((n) => n.id).sort();
+      expect(sinLeer).toEqual(["coincidencia-borrada", "reclamo-vivo", "seguida-viva", "sin-publicacion"]);
+      expect(rows.find((n) => n.id === "seguida-borrada")!.readAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    } finally { upgraded.$client.close(); }
+  });
+});

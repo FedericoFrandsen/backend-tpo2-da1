@@ -1,8 +1,8 @@
-import { and, count, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, isNull, ne } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { optionalUser, requireUser } from "../auth";
 import type { AppDatabase } from "../database";
-import { claims, follows, halladoPublications as posts } from "../db/schema";
+import { claims, follows, halladoPublications as posts, notifications } from "../db/schema";
 import { ApiError } from "../errors";
 import { expirePendingClaims, filtersFromQuery, getPost, isExpired, notify, notifyExpiry, notifyFollowers, notifyMatches, notifyRenewal, ownerPost, postEstado, preparePublication, reconcileFollowedExpiries, rememberSearch, searchOrigin, searchPosts, serializePost, serializeSummaries } from "../queries";
 import { CATEGORIES, publicationBody, ZONES } from "../types";
@@ -108,6 +108,10 @@ export function publicationRoutes(db: AppDatabase) {
           notify(tx, c.userId, "reclamo", "La publicación fue eliminada", { claimId: c.id, publicationId: p.id });
         }
         notifyFollowers(tx, p, `Se eliminó: ${p.titulo}`);
+        // La publicación ya no aparece en Seguidas ni en /me/reclamos: sus avisos (también los recién creados) quedarían sin
+        // leer y sin forma de limpiarse. Las coincidencias de alertas se conservan.
+        tx.update(notifications).set({ readAt: now })
+          .where(and(eq(notifications.publicationId, p.id), ne(notifications.tipo, "coincidencia"), isNull(notifications.readAt))).run();
       });
       return { message: "Publicación eliminada" };
     })
@@ -121,7 +125,12 @@ export function publicationRoutes(db: AppDatabase) {
     })
     .delete("/publicaciones/:id/seguir", async ({ headers, params }) => {
       const user = await requireUser(db, headers);
-      db.delete(follows).where(and(eq(follows.userId, user.id), eq(follows.publicationId, params.id))).run();
+      db.transaction((tx) => {
+        tx.delete(follows).where(and(eq(follows.userId, user.id), eq(follows.publicationId, params.id))).run();
+        // Sin el seguimiento la publicación sale de Seguidas: sus avisos pendientes ya no se pueden limpiar desde ahí.
+        tx.update(notifications).set({ readAt: nowIso() })
+          .where(and(eq(notifications.userId, user.id), eq(notifications.publicationId, params.id), eq(notifications.tipo, "publicacion"), isNull(notifications.readAt))).run();
+      });
       return { siguiendo: false };
     })
     .get("/me/seguidas", async ({ headers, query }) => {
