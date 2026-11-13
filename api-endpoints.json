@@ -249,6 +249,24 @@
     {
       "method": "GET",
       "path": "/usuarios/:id/agradecimientos"
+    },
+    {
+      "method": "GET",
+      "path": "/reclamos/:id/devolucion",
+      "auth": true,
+      "description": "Consulta el rol de la persona y el estado de la devolución."
+    },
+    {
+      "method": "POST",
+      "path": "/reclamos/:id/devolucion/qr",
+      "auth": true,
+      "description": "Quien devuelve genera un QR válido por 15 minutos; reemplaza el anterior."
+    },
+    {
+      "method": "POST",
+      "path": "/reclamos/:id/devolucion/confirmar",
+      "auth": true,
+      "description": "Quien recupera envía {codigo} leído por la cámara. Confirma la devolución una sola vez."
     }
   ]
 }

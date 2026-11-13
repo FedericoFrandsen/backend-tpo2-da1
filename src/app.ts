@@ -9,6 +9,7 @@ import { sendOtp, type OtpSender } from "./mailer";
 import { authRoutes } from "./routes/auth";
 import { encounterRoutes } from "./routes/encounters";
 import { historyRoutes } from "./routes/history";
+import { returnRoutes } from "./routes/returns";
 import { interactionRoutes } from "./routes/interactions";
 import { publicationRoutes } from "./routes/publications";
 import { searchRoutes } from "./routes/searches";
@@ -53,6 +54,7 @@ export function createApp(db: AppDatabase = createDatabase(), options: { sendOtp
     .use(publicationRoutes(db))
     .use(interactionRoutes(db))
     .use(encounterRoutes(db))
+    .use(returnRoutes(db))
     .use(historyRoutes(db))
     .use(searchRoutes(db))
     .use(uploadRoutes(db, options.uploadsPath ?? config.uploadsPath));

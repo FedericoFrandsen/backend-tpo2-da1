@@ -173,3 +173,11 @@ export const loginAttempts = sqliteTable("hallado_login_attempts", {
   attempts: integer("attempts").notNull().default(0),
   windowStart: text("window_start").notNull(),
 });
+
+export const returnCodes = sqliteTable("hallado_return_codes", {
+  claimId: text("claim_id").primaryKey().references(() => claims.id),
+  intento: integer("intento").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+});
