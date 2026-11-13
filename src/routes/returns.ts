@@ -36,7 +36,7 @@ export function returnRoutes(db: AppDatabase) {
       const token = crypto.randomUUID();
       const tokenHash = await sha256(token);
       const codigo = `hallado:devolucion:${token}`;
-      const imagen = await QRCode.toDataURL(codigo, { width: 320, margin: 4, errorCorrectionLevel: "M" });
+      const imagen = await QRCode.toDataURL(JSON.stringify({ reclamoId: params.id, codigo }), { width: 320, margin: 4, errorCorrectionLevel: "M" });
       const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
       db.transaction((tx) => {
         const { c, p, holder } = participants(tx, params.id, user.id);

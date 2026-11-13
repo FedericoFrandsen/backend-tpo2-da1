@@ -189,7 +189,10 @@ Qué **no** está certificado: el envío real de correo con Resend (el adaptador
 - `POST /reclamos/:id/devolucion/qr`: quien devuelve obtiene una imagen PNG
   en `imagen` (data URI) y su vencimiento en `expiresAt`.
 - `POST /reclamos/:id/devolucion/confirmar`: quien recupera envía
-  `{ "codigo": "contenido leído del QR" }` para cerrar el caso.
+  `{ "codigo": "código extraído del QR" }` para cerrar el caso.
+
+La imagen contiene un JSON con `reclamoId` y `codigo`, compatible con el
+escáner de la app. El escáner verifica el reclamo antes de pedir confirmación.
 
 Se comprueban las partes, el intento del reclamo, el código y su vencimiento
 (15 minutos). Generar uno nuevo reemplaza el anterior. La confirmación y el

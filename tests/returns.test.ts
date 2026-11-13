@@ -40,7 +40,8 @@ beforeEach(async () => {
     tokens.push((await createSession(db, id, 1)).token);
   }
   qrSpy = spyOn(QRCode, "toDataURL").mockImplementation(((text: string, options: any) => {
-    generated = text;
+    generated = JSON.parse(text).codigo;
+    expect(JSON.parse(text).reclamoId).toStartWith("claim-");
     return originalQr(text, options);
   }) as any);
 });
