@@ -4,6 +4,7 @@ import { requireUser } from "../auth";
 import type { AppDatabase, Store } from "../database";
 import { claims, halladoPublications as posts, halladoReviews, messages } from "../db/schema";
 import { ApiError } from "../errors";
+import { completeReturn } from "../returns";
 import { acceptedClaim, expirePendingClaims, getClaim, getPost, isClaimExpired, isExpired, notify, notifyFollowers, notifyMatches, ownedProof, ownerPost, publicProfile, serializeClaim, serializePost, zoneName } from "../queries";
 import { claimBody } from "../types";
 import { cleanText, nowIso, paginate, reviewDeadline } from "../utils";
@@ -166,14 +167,7 @@ export function interactionRoutes(db: AppDatabase) {
         const p = ownerPost(tx, params.id, user.id);
         const c = acceptedClaim(tx, p.id);
         if (p.estado !== "en_reclamo" || !c) throw new ApiError(409, "NO_ACCEPTED_CLAIM", "Para resolver, primero aceptá un reclamo");
-        const now = nowIso();
-        tx.update(posts).set({ estado: "resuelta", resolvedAt: now, updatedAt: now }).where(eq(posts.id, p.id)).run();
-        for (const other of tx.select().from(claims).where(and(eq(claims.publicationId, p.id), eq(claims.estado, "pendiente"))).all()) {
-          tx.update(claims).set({ estado: "rechazado", updatedAt: now }).where(eq(claims.id, other.id)).run();
-          notify(tx, other.userId, "reclamo", `La publicación ya se resolvió: ${p.titulo}`, { publicationId: p.id, claimId: other.id });
-        }
-        notify(tx, c.userId, "devolucion", `Se concretó la devolución: ${p.titulo}`, { publicationId: p.id, claimId: c.id });
-        notifyFollowers(tx, p, `Se resolvió: ${p.titulo}`);
+        completeReturn(tx, p, c);
       });
       return serializePost(db, getPost(db, params.id), user.id, true);
     })

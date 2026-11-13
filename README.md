@@ -182,3 +182,23 @@ Las pruebas usan SQLite en memoria y carpetas temporales. Incluyen registro por 
 Además de los casos sueltos, el bloque «recorridos de punta a punta» de `tests/app.test.ts` encadena con dos cuentas el hallazgo completo (fotos y pregunta, evidencia, aceptar, teléfono según consentimiento de cada parte, propuesta y alternativa de encuentro, resolver, valorar y agradecer), el caso de pérdida (foto y barrio obligatorios, rechazo, cancelación y tres intentos), el registro con reenvío y vencimiento del OTP seguido de la recuperación de contraseña (el código anterior y la contraseña anterior dejan de servir y se revocan las sesiones previas), y la alerta por radio, las seguidas, las cinco devoluciones y el plazo de 7 días. Correr todo: `bun run check`.
 
 Qué **no** está certificado: el envío real de correo con Resend (el adaptador solo se probó con respuestas simuladas del proveedor; falta una prueba con clave, dominio verificado y una casilla propia), y el uso desde la app en un Android real. Los servicios del frontend se ejercitaron una vez contra este servidor como proceso, con una base temporal y `EMAIL_MODE=console`; esa corrida no queda como prueba automática en el repositorio.
+
+## Devolución por QR
+
+- `GET /reclamos/:id/devolucion`: estado y rol de la persona autenticada.
+- `POST /reclamos/:id/devolucion/qr`: quien devuelve obtiene una imagen PNG
+  en `imagen` (data URI) y su vencimiento en `expiresAt`.
+- `POST /reclamos/:id/devolucion/confirmar`: quien recupera envía
+  `{ "codigo": "contenido leído del QR" }` para cerrar el caso.
+
+Se comprueban las partes, el intento del reclamo, el código y su vencimiento
+(15 minutos). Generar uno nuevo reemplaza el anterior. La confirmación y el
+consumo del código se guardan en una transacción; repetir una confirmación
+exitosa no duplica avisos ni modifica la fecha de devolución.
+
+`qrcode` genera la imagen localmente, sin enviar datos a servicios externos.
+La migración agrega `hallado_return_codes` y se aplica al iniciar el backend.
+El endpoint anterior `/publicaciones/:id/resolver` se conserva para clientes
+anteriores; la app actual usa el flujo de QR.
+
+Pruebas específicas: `bun test tests/returns.test.ts`.
