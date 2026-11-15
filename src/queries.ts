@@ -429,10 +429,44 @@ export function preparePublication(db: Store, userId: string, input: Publication
     preguntaVerificacion, respuestaVerificacion,
   };
 }
+export async function sendExpoPushNotification(token: string, title: string, body: string, data: Record<string, any>) {
+  if (!token || !token.startsWith('ExponentPushToken')) return;
+  try {
+    await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: token,
+        title,
+        body,
+        data,
+        sound: 'default',
+        channelId: 'hallado-notificaciones',
+      }),
+    });
+  } catch {
+    // Si falla el envío hacia Expo, no interrumpe el backend
+  }
+}
+
 export function notify(db: Store, userId: string, tipo: string, mensaje: string,
   data: { publicationId?: string; claimId?: string; alertId?: string; dedupeKey?: string } = {}) {
   db.insert(notifications).values({ id: crypto.randomUUID(), userId, tipo, mensaje, ...data, createdAt: nowIso() })
     .onConflictDoNothing().run();
+
+  if (tipo === 'reclamo' || tipo === 'encuentro') {
+    try {
+      const client = (db as any).$client || (db as any).client;
+      if (client?.query) {
+        const row = client.query('SELECT token FROM hallado_push_tokens WHERE user_id = ?').get(userId) as { token: string } | null;
+        if (row?.token) {
+          sendExpoPushNotification(row.token, 'Hallado', mensaje, { tipo, ...data });
+        }
+      }
+    } catch {
+      // Ignorar si la tabla no está inicializada
+    }
+  }
 }
 /** Con `dedupeKey` el aviso es único por seguidor: repetirlo con la misma clave no vuelve a notificar. */
 export function notifyFollowers(db: Store, post: Post, mensaje: string, dedupeKey?: string) {

@@ -33,6 +33,17 @@ export function userRoutes(db: AppDatabase) {
   };
   return new Elysia()
     .get("/me", async ({ headers }) => privateProfile(db, (await requireUser(db, headers)).id))
+    .post("/me/push-token", async ({ headers, body }) => {
+      const user = await requireUser(db, headers);
+      const client = (db as any).$client || (db as any).client;
+      if (client?.run) {
+        client.run(
+          "INSERT INTO hallado_push_tokens (user_id, token, updated_at) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at",
+          [user.id, body.token.trim(), new Date().toISOString()]
+        );
+      }
+      return { message: "Token push registrado" };
+    }, { body: t.Object({ token: t.String({ minLength: 1 }) }) })
     .patch("/me", async ({ headers, body }) => {
       const user = await requireUser(db, headers);
       if (body.avatarUrl) {
