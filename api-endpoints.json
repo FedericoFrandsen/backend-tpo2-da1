@@ -59,6 +59,10 @@
       "path": "/me"
     },
     {
+      "method": "POST",
+      "path": "/me/push-token"
+    },
+    {
       "method": "GET",
       "path": "/usuarios/:id"
     },
