@@ -63,6 +63,15 @@ export async function requireUser(db: AppDatabase, headers: RequestHeaders): Pro
   return user;
 }
 
+/** Usuario y sesión de la petición (la sesión identifica el dispositivo para el push). */
+export async function requireSession(db: AppDatabase, headers: RequestHeaders) {
+  const user = await requireUser(db, headers);
+  const session = db.select({ id: sessions.id }).from(sessions)
+    .where(eq(sessions.tokenHash, await sha256(bearerToken(headers)!))).get();
+  if (!session) throw new ApiError(401, "INVALID_SESSION", "La sesión no existe o venció");
+  return { user, sessionId: session.id };
+}
+
 export async function createSession(db: AppDatabase, userId: string, sessionDays: number) {
   const token = `${crypto.randomUUID()}.${crypto.randomUUID()}`;
   const createdAt = nowIso();

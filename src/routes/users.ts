@@ -1,9 +1,10 @@
 import { and, desc, eq } from "drizzle-orm";
 import { Elysia, t } from "elysia";
-import { requireUser } from "../auth";
+import { requireSession, requireUser } from "../auth";
 import type { AppDatabase } from "../database";
 import { halladoReviews, users, uploads } from "../db/schema";
 import { ApiError } from "../errors";
+import { isExpoPushToken, registerPushToken, unregisterPushToken } from "../push";
 import { privateProfile, publicProfile, zoneName } from "../queries";
 import { cleanText, paginate } from "../utils";
 
@@ -33,17 +34,21 @@ export function userRoutes(db: AppDatabase) {
   };
   return new Elysia()
     .get("/me", async ({ headers }) => privateProfile(db, (await requireUser(db, headers)).id))
+    // El token queda asociado a esta sesión: logout, vencimiento o cambio de contraseña lo desvinculan, y registrarlo
+    // desde otra cuenta lo mueve (nunca recibe avisos de dos cuentas).
     .post("/me/push-token", async ({ headers, body }) => {
-      const user = await requireUser(db, headers);
-      const client = (db as any).$client || (db as any).client;
-      if (client?.run) {
-        client.run(
-          "INSERT INTO hallado_push_tokens (user_id, token, updated_at) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at",
-          [user.id, body.token.trim(), new Date().toISOString()]
-        );
-      }
+      const { user, sessionId } = await requireSession(db, headers);
+      const token = body.token.trim();
+      if (!isExpoPushToken(token)) throw new ApiError(422, "INVALID_PUSH_TOKEN", "El token push no tiene el formato de Expo");
+      registerPushToken(db, sessionId, user.id, token);
       return { message: "Token push registrado" };
-    }, { body: t.Object({ token: t.String({ minLength: 1 }) }) })
+    }, { body: t.Object({ token: t.String({ minLength: 1, maxLength: 255 }) }) })
+    // Desvincula el dispositivo sin cerrar la sesión (p. ej. si se desactivan los avisos). Sin `token`, el de esta sesión.
+    .delete("/me/push-token", async ({ headers, body }) => {
+      const { user, sessionId } = await requireSession(db, headers);
+      unregisterPushToken(db, sessionId, user.id, body?.token?.trim() || undefined);
+      return { message: "Token push eliminado" };
+    }, { body: t.Optional(t.Object({ token: t.Optional(t.String({ maxLength: 255 })) })) })
     .patch("/me", async ({ headers, body }) => {
       const user = await requireUser(db, headers);
       if (body.avatarUrl) {

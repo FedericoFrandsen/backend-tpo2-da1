@@ -97,7 +97,7 @@ Si una cuenta demo ya existía, se conserva su contraseña y perfil anterior. Re
 - Seguir publicaciones y recibir sus novedades.
 - Alertas de búsqueda, coincidencias y notificaciones persistentes con estado de lectura.
 - Subida autenticada de imágenes JPEG/PNG/WebP, hasta 5 MB por archivo y hasta cinco fotos por publicación.
-- Sin push de Expo ni SMS: alertas, notificaciones y mensajes se consultan por HTTP.
+- Push de Expo para reclamos (nuevo, aceptado, rechazado, cancelado, vencido a las 48 h), devoluciones y puntos de encuentro; ver [Notificaciones push](#notificaciones-push). El resto de las notificaciones, las alertas y los mensajes se consultan por HTTP. Sin SMS.
 
 La biometría, los permisos GPS, la selección de fotos y el almacenamiento seguro del token corresponden a Expo/dispositivo. El backend no solicita ni guarda datos biométricos.
 
@@ -134,6 +134,36 @@ EMAIL_FROM=Hallado <tu-remitente@tu-dominio.com>
 - Reiniciá el servidor después de cambiar `.env`.
 
 Estado de la prueba: el adaptador de Resend está implementado y las pruebas simulan las respuestas del proveedor. No se envió ningún email real ni se usaron credenciales reales. Documentación del envío: https://resend.com/docs/api-reference/emails/send-email
+
+## Notificaciones push
+
+La app registra el token de Expo del dispositivo con `POST /me/push-token` `{ token }` (Bearer). El backend lo guarda **asociado a esa sesión**:
+
+- `POST /auth/logout`, el vencimiento de la sesión o el cambio de contraseña lo desvinculan.
+- Un token pertenece a un solo dispositivo: si otra cuenta lo registra en el mismo teléfono, se mueve y se cancelan los envíos pendientes de la cuenta anterior. Una persona puede tener varios dispositivos y cada uno recibe su aviso.
+- `DELETE /me/push-token` (opcional `{ token }`) lo desvincula sin cerrar la sesión.
+- Formatos aceptados: `ExponentPushToken[...]`, `ExpoPushToken[...]` o un UUID (regla de `expo-server-sdk`); otro valor da 422 `INVALID_PUSH_TOKEN`.
+
+Cada notificación de tipo `reclamo`, `devolucion` o `encuentro` se encola en `hallado_push_outbox` dentro de la misma transacción que la guarda: si la operación se revierte no se envía nada, y una notificación deduplicada no se reenvía. Al terminar cada petición, y en el proceso de fondo cada `BACKGROUND_INTERVAL_SECONDS`, se envía lo pendiente a `https://exp.host/--/api/v2/push/send` con canal `hallado-notificaciones`, prioridad alta y `data` `{ id, notificationId, tipo, claimId, reclamoId, publicationId, publicacionId }`.
+
+El proceso de fondo arranca con `bun run dev`/`start`/`demo` y se detiene con Ctrl+C (SIGINT/SIGTERM espera el ciclo en curso y cierra la base). También vence los reclamos pendientes de más de 48 h y avisa al reclamante una sola vez aunque nadie use la API.
+
+| Variable | Qué hace |
+| --- | --- |
+| `PUSH_MODE` | `expo` (por defecto) envía a Expo; `off` no envía (los avisos siguen en `/notificaciones`). |
+| `EXPO_ACCESS_TOKEN` | Opcional. Solo si el proyecto de Expo activó *enhanced push security*. |
+| `BACKGROUND_INTERVAL_SECONDS` | Intervalo del proceso de fondo (30 por defecto). |
+
+Fallos y estados (columna `estado` de `hallado_push_outbox`, con el motivo en `error`):
+
+- Red caída, timeout de 10 s, HTTP 429/5xx o ticket `MessageRateExceeded`: se reintenta con espera exponencial (30 s, 1 min, 2 min…, tope 30 min), hasta 5 intentos; después queda `fallido`. Un push que no salió en 24 h se `cancela`.
+- HTTP 4xx (pedido inválido, `UNAUTHORIZED` si falta el token de acceso): `fallido` sin reintento, con aviso en consola.
+- Ticket `ok`: `enviado`. A los 15 min se consulta el recibo (`getReceipts`): `ok` pasa a `aceptado`; `DeviceNotRegistered` (en ticket o recibo) borra el token; sin recibo en 24 h queda `sin_recibo`.
+- Sin dispositivo vigente no se encola nada.
+
+Límites reales: `aceptado` significa que FCM/APNs aceptó el mensaje, no que el teléfono lo mostró. La entrega en Android requiere un development build (no Expo Go) con `projectId` de EAS y credenciales FCM cargadas en Expo; nada de eso está en este repositorio. Las pruebas simulan la API de Expo sin red ni credenciales; no se verificó una entrega real a un dispositivo. Documentación: https://docs.expo.dev/push-notifications/sending-notifications/
+
+La migración `20261115214343_push_notificaciones` reemplaza la tabla `hallado_push_tokens` que el PR #6 creaba fuera de las migraciones: los tokens anteriores (uno por usuario, sin sesión) se descartan y la app los vuelve a registrar al abrirse con sesión iniciada.
 
 ## Persistencia y migraciones
 

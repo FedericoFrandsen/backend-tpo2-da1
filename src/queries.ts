@@ -3,6 +3,7 @@ import { union } from "drizzle-orm/sqlite-core";
 import type { Store } from "./database";
 import { alerts, claims, follows, halladoPublications as posts, halladoReviews, notifications, searchHistory, uploads, users } from "./db/schema";
 import { ApiError } from "./errors";
+import { enqueuePush, PUSH_TIPOS } from "./push";
 import { config } from "./config";
 import { CATEGORIES, ZONES, type PublicationBody, type SearchFilters } from "./types";
 import { cleanText, distanceKm, franjaDeHora, localDate, localTime, normalizeText, nowIso, pageOptions, paginate, requireDate } from "./utils";
@@ -21,12 +22,26 @@ export function isClaimExpired(claim: { estado: string; updatedAt?: string; crea
   return Date.now() - fecha >= CLAIM_EXPIRATION_MS;
 }
 
+/**
+ * Vence los reclamos pendientes sin respuesta en 48 h y avisa a cada reclamante una sola vez (la `dedupeKey` y el
+ * `UPDATE ... RETURNING` limitado a los pendientes evitan repetir el aviso aunque se llame muchas veces). Lo llaman las
+ * consultas y el proceso de fondo (`src/jobs.ts`), que avisa aunque nadie haga una petición.
+ */
 export function expirePendingClaims(db: Store): void {
   const cutoff = new Date(Date.now() - CLAIM_EXPIRATION_MS).toISOString();
-  db.update(claims)
-    .set({ estado: "vencido" })
-    .where(and(eq(claims.estado, "pendiente"), sql`${claims.updatedAt} <= ${cutoff}`))
-    .run();
+  db.transaction((tx) => {
+    const expired = tx.update(claims)
+      .set({ estado: "vencido" })
+      .where(and(eq(claims.estado, "pendiente"), sql`${claims.updatedAt} <= ${cutoff}`))
+      .returning({ id: claims.id, userId: claims.userId, publicationId: claims.publicationId, intentos: claims.intentos })
+      .all();
+    for (const c of expired) {
+      const post = tx.select({ titulo: posts.titulo }).from(posts).where(eq(posts.id, c.publicationId)).get();
+      notify(tx, c.userId, "reclamo", `Venció tu reclamo en ${post?.titulo ?? "una publicación"}: pasaron 48 h sin respuesta`, {
+        publicationId: c.publicationId, claimId: c.id, dedupeKey: `reclamo-vencido:${c.id}:${c.intentos}`,
+      });
+    }
+  });
 }
 
 /**
@@ -429,44 +444,17 @@ export function preparePublication(db: Store, userId: string, input: Publication
     preguntaVerificacion, respuestaVerificacion,
   };
 }
-export async function sendExpoPushNotification(token: string, title: string, body: string, data: Record<string, any>) {
-  if (!token || !token.startsWith('ExponentPushToken')) return;
-  try {
-    await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        to: token,
-        title,
-        body,
-        data,
-        sound: 'default',
-        channelId: 'hallado-notificaciones',
-      }),
-    });
-  } catch {
-    // Si falla el envío hacia Expo, no interrumpe el backend
-  }
-}
-
+/**
+ * Guarda la notificación y, si su tipo sale por push, la encola en la misma transacción (ver `src/push.ts`): el envío
+ * ocurre después del commit, nunca para una transacción revertida, y una notificación deduplicada no se reenvía.
+ */
 export function notify(db: Store, userId: string, tipo: string, mensaje: string,
   data: { publicationId?: string; claimId?: string; alertId?: string; dedupeKey?: string } = {}) {
-  db.insert(notifications).values({ id: crypto.randomUUID(), userId, tipo, mensaje, ...data, createdAt: nowIso() })
-    .onConflictDoNothing().run();
-
-  if (tipo === 'reclamo' || tipo === 'encuentro') {
-    try {
-      const client = (db as any).$client || (db as any).client;
-      if (client?.query) {
-        const row = client.query('SELECT token FROM hallado_push_tokens WHERE user_id = ?').get(userId) as { token: string } | null;
-        if (row?.token) {
-          sendExpoPushNotification(row.token, 'Hallado', mensaje, { tipo, ...data });
-        }
-      }
-    } catch {
-      // Ignorar si la tabla no está inicializada
-    }
-  }
+  db.transaction((tx) => {
+    const inserted = tx.insert(notifications).values({ id: crypto.randomUUID(), userId, tipo, mensaje, ...data, createdAt: nowIso() })
+      .onConflictDoNothing().returning({ id: notifications.id }).get();
+    if (inserted && PUSH_TIPOS.has(tipo)) enqueuePush(tx, inserted.id, userId);
+  });
 }
 /** Con `dedupeKey` el aviso es único por seguidor: repetirlo con la misma clave no vuelve a notificar. */
 export function notifyFollowers(db: Store, post: Post, mensaje: string, dedupeKey?: string) {

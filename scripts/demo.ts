@@ -31,8 +31,8 @@ try {
   if (Bun.argv.includes("--prepare-only")) {
     db.$client.close();
   } else {
-    const { createApp } = await import("../src/app");
-    createApp(db).listen({ hostname: "0.0.0.0", port: config.port });
+    const { startServer } = await import("../src/server");
+    startServer(db);
     console.log(`API de demo: http://localhost:${config.port}`);
     console.log(config.emailMode === "console" ? "OTP de ensayo: leelos en esta terminal; no se envía email." : "Envío de OTP por email activado.");
   }

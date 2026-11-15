@@ -16,9 +16,14 @@ import { searchRoutes } from "./routes/searches";
 import { uploadRoutes } from "./routes/uploads";
 import { userRoutes } from "./routes/users";
 import { nowIso } from "./utils";
+import type { PushDispatcher } from "./push";
 import documentation from "../api-endpoints.json";
 
-export function createApp(db: AppDatabase = createDatabase(), options: { sendOtp?: OtpSender; uploadsPath?: string } = {}) {
+/**
+ * `push`: despachador de notificaciones push. Si se indica, cada respuesta pide un envío de lo encolado (las
+ * transacciones de la petición ya están confirmadas); sin él, la bandeja la procesa solo el proceso de fondo.
+ */
+export function createApp(db: AppDatabase = createDatabase(), options: { sendOtp?: OtpSender; uploadsPath?: string; push?: Pick<PushDispatcher, "kick"> } = {}) {
   db.delete(sessions).where(lte(sessions.expiresAt, nowIso())).run();
   db.delete(otpCodes).where(lte(otpCodes.expiresAt, nowIso())).run();
   return new Elysia({ serve: { maxRequestBodySize: 6 * 1024 * 1024 } })
@@ -44,6 +49,7 @@ export function createApp(db: AppDatabase = createDatabase(), options: { sendOtp
     .onAfterHandle(({ path, set }) => {
       if (CATALOG_PATHS.has(path)) set.headers[CATALOG_VERSION_HEADER] = CATALOG_VERSION;
     })
+    .onAfterResponse(() => options.push?.kick())
     .as("global")
     .options("/*", ({ status }) => status(204))
     .get("/", () => ({ name: config.name, version: config.version, health: "/health", documentation: "/docs" }))

@@ -10,6 +10,11 @@ function positiveInteger(name: string, fallback: number) {
   return value;
 }
 
+const pushMode = Bun.env.PUSH_MODE ?? "expo";
+if (!["expo", "off"].includes(pushMode)) {
+  throw new Error("PUSH_MODE debe ser expo u off.");
+}
+
 const nodeEnv = Bun.env.NODE_ENV ?? "development";
 const emailMode = Bun.env.EMAIL_MODE ?? "console";
 if (!["console", "resend"].includes(emailMode)) {
@@ -35,6 +40,9 @@ export const config = {
   emailMode,
   resendApiKey: Bun.env.RESEND_API_KEY ?? "",
   emailFrom: Bun.env.EMAIL_FROM ?? "",
+  pushMode,
+  expoAccessToken: Bun.env.EXPO_ACCESS_TOKEN ?? "",
+  backgroundIntervalSeconds: positiveInteger("BACKGROUND_INTERVAL_SECONDS", 30),
   nodeEnv,
   isProduction: nodeEnv === "production",
 } as const;

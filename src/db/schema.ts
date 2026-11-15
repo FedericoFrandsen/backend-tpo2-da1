@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { users } from "./legacy";
+import { sessions, users } from "./legacy";
 import { CATEGORIES } from "../types";
 import { publicationExpiry } from "../utils";
 export * from "./legacy";
@@ -181,3 +181,44 @@ export const returnCodes = sqliteTable("hallado_return_codes", {
   expiresAt: text("expires_at").notNull(),
   usedAt: text("used_at"),
 });
+
+/**
+ * Dispositivo que recibe push de Expo. Cada fila pertenece a una sesión: cerrar sesión, vencerla o revocarla al cambiar
+ * la contraseña la borra en cascada, y un token solo puede estar en una fila, así que al iniciar sesión con otra cuenta
+ * en el mismo teléfono el token deja de recibir los avisos de la anterior. Una persona puede tener varios dispositivos.
+ */
+export const pushTokens = sqliteTable("hallado_push_tokens", {
+  id: text("id").primaryKey(),
+  token: text("token").notNull().unique(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sessionId: text("session_id").notNull().unique().references(() => sessions.id, { onDelete: "cascade" }),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (t) => [index("hallado_push_token_usuario_idx").on(t.userId)]);
+
+export const PUSH_ESTADOS = ["pendiente", "enviado", "aceptado", "fallido", "cancelado", "sin_recibo"] as const;
+/**
+ * Bandeja de salida de push: se escribe en la misma transacción que la notificación (un rollback no deja envíos) y la
+ * despacha el proceso de fondo después del commit. Una fila por notificación y dispositivo.
+ * - pendiente: falta enviarla (o reintentarla en `proximo_intento_at`).
+ * - enviado: Expo devolvió un ticket `ok` (`ticket_id`); falta consultar el recibo.
+ * - aceptado: el recibo es `ok` (FCM/APNs lo aceptó; no confirma que el teléfono lo haya mostrado).
+ * - fallido / cancelado / sin_recibo: estados finales; `error` guarda el motivo.
+ */
+export const pushOutbox = sqliteTable("hallado_push_outbox", {
+  id: text("id").primaryKey(),
+  notificationId: text("notification_id").notNull().references(() => notifications.id, { onDelete: "cascade" }),
+  pushTokenId: text("push_token_id").references(() => pushTokens.id, { onDelete: "set null" }),
+  estado: text("estado", { enum: PUSH_ESTADOS }).notNull().default("pendiente"),
+  intentos: integer("intentos").notNull().default(0),
+  proximoIntentoAt: text("proximo_intento_at").notNull(),
+  ticketId: text("ticket_id"),
+  error: text("error"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (t) => [
+  uniqueIndex("hallado_push_envio_unique").on(t.notificationId, t.pushTokenId),
+  index("hallado_push_envio_estado_idx").on(t.estado, t.proximoIntentoAt),
+  index("hallado_push_envio_token_idx").on(t.pushTokenId),
+  check("hallado_push_envio_estado_check", sql`${t.estado} IN ('pendiente','enviado','aceptado','fallido','cancelado','sin_recibo')`),
+]);

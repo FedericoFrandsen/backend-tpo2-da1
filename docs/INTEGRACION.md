@@ -234,7 +234,7 @@ Las dos partes pueden valorar a su contraparte una única vez tras resolver. Se 
 - `POST /reclamos/:id/mensajes`: `{ texto }`.
 - Requiere un reclamo aceptado y participación como autor o reclamante. Un tercero recibe 403 y un reclamo sin aceptar 409.
 - No requiere compartir teléfono. Tras resolver la devolución la conversación sigue disponible para las mismas partes.
-- Transporte HTTP; la app puede consultar periódicamente. No se implementó WebSocket ni push de Expo.
+- Transporte HTTP; la app puede consultar periódicamente. No se implementó WebSocket; los mensajes no salen por push.
 
 ## Alertas y notificaciones: useAlertas
 
@@ -246,6 +246,13 @@ Las dos partes pueden valorar a su contraparte una única vez tras resolver. Se 
 - `GET /notificaciones`: paginadas; agrega `sinLeer` total.
 - `POST /notificaciones/:id/leida` y `POST /notificaciones/leidas`.
 - `GET /notificaciones/resumen` y `POST /notificaciones/grupo/leida`: contadores sin leer y lectura por grupo, descritos abajo.
+
+### Notificaciones push
+
+- `POST /me/push-token`: `{ token }` con el valor de `getExpoPushTokenAsync()`. Queda asociado a la sesión del Bearer; `POST /auth/logout` lo desvincula. Formato inválido: 422 `INVALID_PUSH_TOKEN`.
+- `DELETE /me/push-token`: opcional `{ token }`; desvincula el dispositivo sin cerrar sesión.
+- Push: `title` («Reclamo», «Devolución» o «Punto de encuentro»), `body` igual al `mensaje` de la notificación, `channelId: "hallado-notificaciones"` y `data: { id, notificationId, tipo, claimId, reclamoId, publicationId, publicacionId }`; `id` es el mismo de `GET /notificaciones`.
+- La app sigue pudiendo crear avisos locales por consulta periódica; para no duplicar, conviene registrar el `data.id` de cada push recibido como ya emitido.
 
 ### Resumen de no leídas
 
@@ -282,4 +289,4 @@ Las dos partes pueden valorar a su contraparte una única vez tras resolver. Se 
 
 Los endpoints anteriores (`GET /notificaciones` paginado, `POST /notificaciones/:id/leida`, `POST /notificaciones/leidas` y `POST /alertas/:id/leida`) siguen igual.
 
-Una publicación nueva o editada que coincide con una alerta activa genera una notificación, excepto si es del mismo usuario. No se repite la misma coincidencia alerta/publicación. Al reactivar se revisan publicaciones creadas o actualizadas desde que se guardó la alerta. Al guardar una alerta no se notifican todas las coincidencias previas. Las notificaciones también incluyen novedades de seguidas, reclamos, devoluciones, mensajes, valoraciones y puntos de encuentro: el tipo `encuentro` (con `reclamoId` y `publicacionId`) avisa a la otra parte cuando se propone un punto de encuentro («Te propusieron un punto de encuentro para …»), cuando se sugiere una alternativa («Te sugirieron otro punto de encuentro para …») y cuando se acepta («Aceptaron el punto de encuentro de …»). Se guardan en SQLite y se consultan desde la app; no se envían por email ni push. Internamente, al publicar, editar o renovar solo se evalúan las alertas activas de otras personas con la misma categoría y la situación opuesta (preselección indexada en SQLite); el barrio, el radio exacto, las palabras, las fechas y la vigencia se comprueban después con la misma regla que la búsqueda, así que el resultado es el mismo que evaluando todas. El trabajo sigue siendo proporcional a las alertas candidatas y puede ser alto si casi todas coinciden.
+Una publicación nueva o editada que coincide con una alerta activa genera una notificación, excepto si es del mismo usuario. No se repite la misma coincidencia alerta/publicación. Al reactivar se revisan publicaciones creadas o actualizadas desde que se guardó la alerta. Al guardar una alerta no se notifican todas las coincidencias previas. Las notificaciones también incluyen novedades de seguidas, reclamos, devoluciones, mensajes, valoraciones y puntos de encuentro: el tipo `encuentro` (con `reclamoId` y `publicacionId`) avisa a la otra parte cuando se propone un punto de encuentro («Te propusieron un punto de encuentro para …»), cuando se sugiere una alternativa («Te sugirieron otro punto de encuentro para …») y cuando se acepta («Aceptaron el punto de encuentro de …»). Se guardan en SQLite y se consultan desde la app; no se envían por email. Las de tipo `reclamo` (incluido el vencimiento a 48 h de un reclamo propio, una sola vez), `devolucion` y `encuentro` también salen por push de Expo a los dispositivos registrados (ver «Notificaciones push»). Internamente, al publicar, editar o renovar solo se evalúan las alertas activas de otras personas con la misma categoría y la situación opuesta (preselección indexada en SQLite); el barrio, el radio exacto, las palabras, las fechas y la vigencia se comprueban después con la misma regla que la búsqueda, así que el resultado es el mismo que evaluando todas. El trabajo sigue siendo proporcional a las alertas candidatas y puede ser alto si casi todas coinciden.

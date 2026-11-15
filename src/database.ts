@@ -14,13 +14,6 @@ export function createDatabase(path = config.databasePath) {
   const db = drizzle({ client });
   try {
     migrate(db, { migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)) });
-    client.run(`
-      CREATE TABLE IF NOT EXISTS hallado_push_tokens (
-        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-        token TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `);
   } catch (error) {
     client.close();
     throw error;
@@ -29,4 +22,4 @@ export function createDatabase(path = config.databasePath) {
 }
 
 export type AppDatabase = ReturnType<typeof createDatabase>;
-export type Store = Pick<AppDatabase, "select" | "insert" | "update" | "delete">;
+export type Store = Pick<AppDatabase, "select" | "insert" | "update" | "delete" | "transaction">;

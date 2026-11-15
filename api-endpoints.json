@@ -63,6 +63,10 @@
       "path": "/me/push-token"
     },
     {
+      "method": "DELETE",
+      "path": "/me/push-token"
+    },
+    {
       "method": "GET",
       "path": "/usuarios/:id"
     },
